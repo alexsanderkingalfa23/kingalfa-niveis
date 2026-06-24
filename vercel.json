@@ -1,7 +1,8 @@
 {
   "version": 2,
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/(.*)", "dest": "/index.html" }
-  ]
+  "functions": {
+    "api/vendas.js": {
+      "runtime": "nodejs18.x"
+    }
+  }
 }
