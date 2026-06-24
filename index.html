@@ -332,8 +332,8 @@ tbody tr:hover td{background:rgba(0,0,0,.1)}
 // ══════════════════════════════════════════════
 // CONFIGURAÇÃO
 // ══════════════════════════════════════════════
-var JSONBIN_ID  = '6a3bdd8bf5f4af5e292909de';
-var JSONBIN_KEY = '$2a$10$ANECHErhwK2T1vC85iYMKeKCp2D/XsT2HRYQw8oUbrSp3cOI41kte';
+var JSONBIN_ID  = 'COLE_O_BIN_ID_AQUI';
+var JSONBIN_KEY = 'COLE_SUA_API_KEY_AQUI';
 var API_BASE    = '';  // vazio = mesmo domínio (Vercel)
 
 // ══════════════════════════════════════════════
@@ -403,7 +403,7 @@ function getVendedor(id){return (appData.vendedores||[]).find(function(v){return
 // ══════════════════════════════════════════════
 // JSONBIN
 // ══════════════════════════════════════════════
-var jbConfigured = () => JSONBIN_ID!=='6a3bdd8bf5f4af5e292909de';
+var jbConfigured = () => JSONBIN_ID!=='COLE_O_BIN_ID_AQUI';
 
 async function loadData() {
   if (!jbConfigured()) { appData = JSON.parse(JSON.stringify(DEFAULT_DATA)); return; }
