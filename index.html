@@ -634,13 +634,13 @@ async function renderGeral() {
   // Fetch vendas for all units
   var vendaData = {};
   await Promise.all(unidades.map(async function(u) {
-    vendaData[u.id] = await fetchVendas(mes, u);
+    vendaData[u.id] = await fetchVendas(mes);
   }));
 
   // Build seller stats
   var sellerStats = vendedores.map(function(v) {
     var u = getUnidade(v.unidadeId);
-    var data = vendaData[v.unidadeId];
+    var data = allData;
     var atualData = getSellerVendas(data.mesAtual, v);
     var anteriorData = getSellerVendas(data.mesAnterior, v);
     var nivelCalc = calcNivel(v, atualData, anteriorData);
@@ -722,7 +722,7 @@ async function renderInd() {
   var niveis = appData.config.niveis;
   var mes = curMes();
 
-  var data = await fetchVendas(mes, u);
+  var data = await fetchVendas(mes);
   var atualData    = getSellerVendas(data.mesAtual, v);
   var anteriorData = getSellerVendas(data.mesAnterior, v);
   var nivelCalc = calcNivel(v, atualData, anteriorData);
@@ -997,7 +997,7 @@ async function syncGestaoClick() {
     vendaCache = {};
 
     await Promise.all(appData.unidades.map(async function(u) {
-      var data = await fetchVendas(mes, u);
+      var data = await fetchVendas(mes);
       appData.vendedores.forEach(function(v) {
         if (v.unidadeId !== u.id) return;
         var atualData    = getSellerVendas(data.mesAtual, v);

@@ -21,7 +21,8 @@ async function fetchVendasMes(mes) {
     const json = await res.json();
     const items = json.data || json.result || json.vendas || [];
     all = all.concat(items);
-    const total = parseInt(json.meta && json.meta.total_registros || json.total || 0);
+    const meta = json.meta || {};
+    const total = parseInt(meta.total_registros || json.total || 0);
     hasMore = items.length === 100 && all.length < total;
     page++;
   }
@@ -32,19 +33,15 @@ async function fetchVendasMes(mes) {
 function classifyVenda(situacao) {
   if (!situacao) return null;
   const s = situacao.trim().toUpperCase();
-  // Exactly "CONCRETIZADA" = service/product
   if (s === 'CONCRETIZADA') return 'servico';
-  // Starts with "CONCRETIZADA " or "CONCRETIZADA(" = phone (financeira)
   if (s.startsWith('CONCRETIZADA ') || s.startsWith('CONCRETIZADA(')) return 'aparelho';
   return null;
 }
 
-function groupByVendedorAndLoja(vendas, nomeLojaGC) {
+function groupByVendedor(vendas) {
   const result = {};
   for (let i = 0; i < vendas.length; i++) {
     const v = vendas[i];
-    const loja = (v.nome_loja || '').trim().toUpperCase();
-    if (nomeLojaGC !== 'TODOS' && loja !== nomeLojaGC.toUpperCase()) continue;
     const nome = (v.nome_vendedor || v.vendedor || '').trim();
     const tipo = classifyVenda(v.nome_situacao || v.situacao || '');
     if (!tipo || !nome) continue;
@@ -55,26 +52,13 @@ function groupByVendedorAndLoja(vendas, nomeLojaGC) {
   return result;
 }
 
-function getUniqueLojas(vendas) {
-  const lojas = {};
-  vendas.forEach(function(v) {
-    const l = (v.nome_loja || '').trim();
-    if (l) lojas[l] = true;
-  });
-  return Object.keys(lojas);
-}
-
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
-  const mes      = req.query.mes;
-  const nomeLoja = req.query.nome_loja || 'TODOS';
-
-  if (!mes) {
-    return res.status(400).json({ error: 'mes e obrigatorio' });
-  }
+  const mes = req.query.mes;
+  if (!mes) return res.status(400).json({ error: 'mes e obrigatorio' });
 
   try {
     const parts = mes.split('-').map(Number);
@@ -88,14 +72,10 @@ module.exports = async function handler(req, res) {
       fetchVendasMes(mesAnterior),
     ]);
 
-    // Return unique store names for debugging
-    const lojas = getUniqueLojas(vendasAtual);
-
     return res.json({
       success:     true,
-      lojas:       lojas,
-      mesAtual:    { mes,              vendas: groupByVendedorAndLoja(vendasAtual, nomeLoja) },
-      mesAnterior: { mes: mesAnterior, vendas: groupByVendedorAndLoja(vendasAnterior, nomeLoja) },
+      mesAtual:    { mes,              vendas: groupByVendedor(vendasAtual) },
+      mesAnterior: { mes: mesAnterior, vendas: groupByVendedor(vendasAnterior) },
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });
