@@ -8,11 +8,11 @@ const LOJAS = [
 async function fetchVendasMes(mes, lojaId, env) {
   const [year, month] = mes.split('-');
   const ultimo = new Date(parseInt(year), parseInt(month), 0).getDate();
-  const inicio = `${year}-${month}-01`;
-  const fim    = `${year}-${month}-${ultimo}`;
+  const inicio = year + '-' + month + '-01';
+  const fim    = year + '-' + month + '-' + ultimo;
   let page = 1, all = [], hasMore = true;
   while (hasMore) {
-    const url = `${GC_BASE}/vendas?data_inicio=${inicio}&data_fim=${fim}&loja_id=${lojaId}&limite=100&pagina=${page}`;
+    const url = GC_BASE + '/vendas?data_inicio=' + inicio + '&data_fim=' + fim + '&loja_id=' + lojaId + '&limite=100&pagina=' + page;
     const res = await fetch(url, { headers: {
       'access-token': env.GC_ACCESS_TOKEN,
       'secret-access-token': env.GC_SECRET_TOKEN,
@@ -43,48 +43,19 @@ function group(vendas, debug) {
     const tipo = classify(v.nome_situacao||'');
     if (!tipo) continue;
     if (!nome) {
-      if(debug) sem_nome.push({id:v.vendedor_id, sit:v.nome_situacao, val:v.valor_total});
+      if (debug) sem_nome.push({vendedor_id: v.vendedor_id, sit: v.nome_situacao, val: v.valor_total});
       continue;
     }
-    if (!r[nome]) r[nome] = {aparelhos:0,servicos:0,valor:0,vendedor_id:v.vendedor_id};
+    if (!r[nome]) r[nome] = {aparelhos:0, servicos:0, valor:0, vendedor_id: v.vendedor_id};
     if (tipo==='aparelho') r[nome].aparelhos++;
     else r[nome].servicos++;
     r[nome].valor += parseFloat(v.valor_total||0);
   }
-  if(debug) r['__sem_nome__'] = sem_nome;
+  if (debug) r['__sem_nome__'] = sem_nome;
   return r;
 }
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    const cors = {'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};
-
-    // API route
-    if (url.pathname === '/api/vendas') {
-      if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
-      const mes = url.searchParams.get('mes');
-      const debug = url.searchParams.get('debug') === '1';
-      if (!mes) return new Response(JSON.stringify({error:'mes obrigatorio'}),{status:400,headers:cors});
-      try {
-        const [y,m] = mes.split('-').map(Number);
-        const mesAnt = m===1 ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,'0')}`;
-        const fetches = [...LOJAS.map(l=>fetchVendasMes(mes,l.id,env)), ...LOJAS.map(l=>fetchVendasMes(mesAnt,l.id,env))];
-        const [v1,v2,v3,a1,a2,a3] = await Promise.all(fetches);
-        const atual = [...v1,...v2,...v3];
-        const ant   = [...a1,...a2,...a3];
-        return new Response(JSON.stringify({
-          success:true,
-          mesAtual:{mes,vendas:group(atual)},
-          mesAnterior:{mes:mesAnt,vendas:group(ant)}
-        }),{headers:cors});
-      } catch(e) {
-        return new Response(JSON.stringify({error:e.message}),{status:500,headers:cors});
-      }
-    }
-
-    // Serve HTML for all other routes
-    const HTML = `<!DOCTYPE html>
+const HTML = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -463,7 +434,7 @@ tbody tr:hover td{background:#FFF9F4}
 var PROGRAMA_INICIO = '2026-07';
 var JSONBIN_ID  = '6a3bdd8bf5f4af5e292909de';
 var JSONBIN_KEY = '$2a$10$WzIxNTgN9XRQfPCpGeVPoODb0VwvPbZoZcVT6nRkodWl01uzLgvXW';
-var API_BASE    = '/api';  // vazio = mesmo domínio (Vercel)
+var API_BASE    = '/.netlify/functions';  // vazio = mesmo domínio (Vercel)
 
 // ══════════════════════════════════════════════
 // DADOS INICIAIS (JSONBin)
@@ -827,23 +798,6 @@ async function renderGeral() {
       '<td style="min-width:90px">'+nxtHtml+'</td></tr>';
   }).join('');
 
-  var rcards = sellerStats.map(function(sk,i) {
-    var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'#'+(i+1);
-    var vStr = 'R$ '+Math.round(sk.valor||0).toLocaleString('pt-BR');
-    return '<div class="rcard">'+
-      '<div class="rcard-pos">'+medal+'</div>'+
-      '<div class="rcard-body">'+
-        '<div class="rcard-name"><span class="vname-pill">'+sk.v.nome+'</span></div>'+
-        '<div class="rcard-meta">'+sk.u.nome+'</div>'+
-        '<div class="rcard-nums">'+
-          '<span class="rcard-val">'+vStr+'</span>'+
-          '<span class="rcard-ap">'+sk.aparelhos+' ap.</span>'+
-          '<span class="badge be">'+sk.lvl.nome+'</span>'+
-        '</div>'+
-      '</div>'+
-    '</div>';
-  }).join('');
-
   g('geral-content').innerHTML =
     '<div class="hero-stats">'+
     '<div class="hstat"><div class="hsl">Total aparelhos</div><div class="hsv">'+totalAp+'</div><div class="hss">mês atual</div></div>'+
@@ -1187,6 +1141,40 @@ init();
 </body>
 </html>
 `;
-return new Response(HTML, {headers:{'Content-Type':'text/html;charset=UTF-8'}});
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    const cors = {'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};
+
+    if (url.pathname === '/api/vendas') {
+      if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
+      const mes = url.searchParams.get('mes');
+      const debug = url.searchParams.get('debug') === '1';
+      if (!mes) return new Response(JSON.stringify({error:'mes obrigatorio'}),{status:400,headers:cors});
+      try {
+        const [y,m] = mes.split('-').map(Number);
+        const mesAnt = m===1 ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0');
+        const [v1,v2,v3,a1,a2,a3] = await Promise.all([
+          fetchVendasMes(mes, LOJAS[0].id, env),
+          fetchVendasMes(mes, LOJAS[1].id, env),
+          fetchVendasMes(mes, LOJAS[2].id, env),
+          fetchVendasMes(mesAnt, LOJAS[0].id, env),
+          fetchVendasMes(mesAnt, LOJAS[1].id, env),
+          fetchVendasMes(mesAnt, LOJAS[2].id, env),
+        ]);
+        const atual = [...v1,...v2,...v3];
+        const ant   = [...a1,...a2,...a3];
+        return new Response(JSON.stringify({
+          success: true,
+          mesAtual:    { mes,      vendas: group(atual, debug) },
+          mesAnterior: { mes: mesAnt, vendas: group(ant, false) },
+        }),{headers:cors});
+      } catch(e) {
+        return new Response(JSON.stringify({error:e.message}),{status:500,headers:cors});
+      }
+    }
+
+    return new Response(HTML, {headers:{'Content-Type':'text/html;charset=UTF-8'}});
   }
 };
