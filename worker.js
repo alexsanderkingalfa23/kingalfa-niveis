@@ -1201,45 +1201,78 @@ export default {
       // se os tokens estão configurados, quantas vendas vieram e quais situações.
       // Serve pra descobrir POR QUE o ranking vem vazio.
       if (debugParam === '2') {
-        const [yy,mm] = mes.split('-');
-        const ultimoD = new Date(parseInt(yy), parseInt(mm), 0).getDate();
-        const inicioD = mes+'-01';
-        const fimD    = mes+'-'+ultimoD;
-        const diag = [];
-        for (const loja of LOJAS) {
-          const u = GC_BASE+'/vendas?data_inicio='+inicioD+'&data_fim='+fimD+'&loja_id='+loja.id+'&limite=100&pagina=1';
-          const entry = {loja: loja.id};
-          try {
-            const res = await fetch(u, {headers:{
-              'access-token': env.GC_ACCESS_TOKEN,
-              'secret-access-token': env.GC_SECRET_TOKEN,
-              'Content-Type':'application/json'
-            }});
-            entry.httpStatus = res.status;
-            const j = await res.json();
-            entry.chavesTopo = Object.keys(j);
-            entry.meta = j.meta || null;
-            const items = j.data || [];
-            entry.qtd = items.length;
-            const sits = {};
-            items.forEach(function(v){ var s=(v.nome_situacao||'(vazio)'); sits[s]=(sits[s]||0)+1; });
-            entry.situacoes = sits;
-            if (items[0]) {
-              entry.amostra = {
-                nome_vendedor: items[0].nome_vendedor,
-                vendedor_id:   items[0].vendedor_id,
-                nome_situacao: items[0].nome_situacao,
-                valor_total:   items[0].valor_total,
-                campos:        Object.keys(items[0])
-              };
-            }
-          } catch(e) { entry.erro = e.message; }
-          diag.push(entry);
+        // Ferramenta de reconciliação. Puxa o mês inteiro (todas as páginas, 3 lojas),
+        // soma o dinheiro por situação, e — com &vendedor=alexsander — lista as vendas
+        // cruas daquele vendedor (situação + valor) pra achar dinheiro que sumiu no filtro.
+        const filtro = (url.searchParams.get('vendedor')||'').trim().toLowerCase();
+        const [d1,d2,d3] = await Promise.all([
+          fetchVendasMes(mes, LOJAS[0].id, env),
+          fetchVendasMes(mes, LOJAS[1].id, env),
+          fetchVendasMes(mes, LOJAS[2].id, env),
+        ]);
+        const todas = [...d1, ...d2, ...d3];
+
+        // Quanto dinheiro existe em cada situação (e quantas vendas)
+        const situacoes = {};
+        todas.forEach(function(v){
+          const s = (v.nome_situacao||'(vazio)');
+          if (!situacoes[s]) situacoes[s] = { qtd:0, valor:0, contaNoApp: !!classify(s) };
+          situacoes[s].qtd++;
+          situacoes[s].valor += parseFloat(v.valor_total||0);
+        });
+        Object.keys(situacoes).forEach(function(k){ situacoes[k].valor = Math.round(situacoes[k].valor); });
+
+        // ROSTER por vendedor_id: a verdade. Cada id, todos os nomes que ele aparece,
+        // e os totais corretos (já com a regra de NF descartada). É o que casa por id.
+        const roster = {};
+        todas.forEach(function(v){
+          const id = v.vendedor_id || '(sem_id)';
+          if (!roster[id]) roster[id] = { nomes:{}, aparelhos:0, servicos:0, valor:0, ignoradas:0 };
+          const nm = (v.nome_vendedor||'(sem_nome)');
+          roster[id].nomes[nm] = (roster[id].nomes[nm]||0)+1;
+          const tipo = classify(v.nome_situacao||'');
+          if (!tipo) { roster[id].ignoradas++; return; }
+          if (tipo==='aparelho') roster[id].aparelhos++; else roster[id].servicos++;
+          roster[id].valor += parseFloat(v.valor_total||0);
+        });
+        Object.keys(roster).forEach(function(id){
+          roster[id].valor = Math.round(roster[id].valor);
+          roster[id].nomes = Object.keys(roster[id].nomes);
+        });
+
+        // Dump cru das vendas de um vendedor específico
+        let vendedor = null;
+        if (filtro) {
+          const matches = todas.filter(function(v){ return (v.nome_vendedor||'').toLowerCase().includes(filtro); });
+          let totalTudo = 0, totalConcretizada = 0;
+          matches.forEach(function(v){
+            const val = parseFloat(v.valor_total||0);
+            totalTudo += val;
+            const s = (v.nome_situacao||'').trim().toUpperCase();
+            if (s.startsWith('CONCRETIZADA')) totalConcretizada += val;
+          });
+          vendedor = {
+            filtro: filtro,
+            qtdVendas: matches.length,
+            valorTodasSituacoes: Math.round(totalTudo),
+            valorSoConcretizada_oQueOAppConta: Math.round(totalConcretizada),
+            diferenca: Math.round(totalTudo - totalConcretizada),
+            nomesEncontrados: [...new Set(matches.map(function(v){ return v.nome_vendedor; }))],
+            vendas: matches.map(function(v){ return {
+              situacao: v.nome_situacao,
+              valor: v.valor_total,
+              nome_vendedor: v.nome_vendedor,
+              vendedor_id: v.vendedor_id
+            };})
+          };
         }
+
         return new Response(JSON.stringify({
           tokensConfigurados: { access: !!env.GC_ACCESS_TOKEN, secret: !!env.GC_SECRET_TOKEN },
-          periodo: { inicio: inicioD, fim: fimD },
-          lojas: diag
+          totalVendas: todas.length,
+          situacoes: situacoes,
+          roster: roster,
+          vendedor: vendedor
         }, null, 2), {headers:cors});
       }
 
