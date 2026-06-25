@@ -37,50 +37,44 @@ function classify(sit) {
 
 // Monta lookup vendedor_id -> nome a partir das vendas que TÊM os dois campos.
 // Usado pra preencher o nome das vendas que vierem só com vendedor_id.
-function buildIdMap(arrays) {
-  const idToNome = {};
-  for (const arr of arrays) {
-    for (const v of arr) {
-      const nome = (v.nome_vendedor||'').trim();
-      const vid  = v.vendedor_id;
-      if (nome && vid != null && vid !== '' && !idToNome[vid]) {
-        idToNome[vid] = nome;
-      }
-    }
-  }
-  return idToNome;
+// Normaliza o nome do vendedor pra casar variantes:
+// tira acento, remove "(VENDEDOR 2)" e afins, colapsa espaços, sobe pra maiúscula.
+function normNome(n) {
+  return (n||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // remove acentos
+    .replace(/\([^)]*\)/g,'')                           // remove "(...)" ex.: (VENDEDOR 2)
+    .replace(/\s+/g,' ').trim().toUpperCase();
 }
 
-function group(vendas, idToNome, debug) {
+// Agrupa por vendedor_id (estável). Retorna:
+//   vendas: { [id]: {aparelhos, servicos, valor, nomes:[...]} }
+//   indexNomes: { [nomeNormalizado]: [id, ...] }  <- usado pra casar nome -> id
+function group(vendas) {
   const r = {};
-  const sem_nome = [];
+  const indexNomes = {};
   for (const v of vendas) {
     const tipo = classify(v.nome_situacao||'');
-    if (!tipo) continue;
+    if (!tipo) continue; // NF e qualquer situação que não seja "Concretizada*" ficam de fora
 
-    let nome = (v.nome_vendedor||'').trim();
+    const id = (v.vendedor_id != null && v.vendedor_id !== '') ? String(v.vendedor_id) : '__sem_id__';
+    if (!r[id]) r[id] = {aparelhos:0, servicos:0, valor:0, nomes:{}};
+    if (tipo==='aparelho') r[id].aparelhos++;
+    else r[id].servicos++;
+    r[id].valor += parseFloat(v.valor_total||0);
 
-    // Backfill: se não tem nome mas tem vendedor_id conhecido, recupera o nome
-    if (!nome) {
-      const vid = v.vendedor_id;
-      if (vid != null && vid !== '' && idToNome[vid]) {
-        nome = idToNome[vid];
+    const nm = (v.nome_vendedor||'').trim();
+    if (nm) {
+      r[id].nomes[nm] = (r[id].nomes[nm]||0)+1;
+      const key = normNome(nm);
+      if (key) {
+        if (!indexNomes[key]) indexNomes[key] = [];
+        if (indexNomes[key].indexOf(id) === -1) indexNomes[key].push(id);
       }
     }
-
-    // Ainda sem nome = venda realmente órfã (sem vendedor_id ou id nunca nomeado)
-    if (!nome) {
-      if (debug) sem_nome.push({vendedor_id: v.vendedor_id, sit: v.nome_situacao, val: v.valor_total});
-      continue;
-    }
-
-    if (!r[nome]) r[nome] = {aparelhos:0, servicos:0, valor:0, vendedor_id: v.vendedor_id};
-    if (tipo==='aparelho') r[nome].aparelhos++;
-    else r[nome].servicos++;
-    r[nome].valor += parseFloat(v.valor_total||0);
   }
-  if (debug) r['__sem_nome__'] = sem_nome;
-  return r;
+  // nomes: objeto -> lista
+  Object.keys(r).forEach(function(id){ r[id].nomes = Object.keys(r[id].nomes); });
+  return { vendas: r, indexNomes: indexNomes };
 }
 
 const HTML = `<!DOCTYPE html>
@@ -567,12 +561,28 @@ async function fetchVendas(mes) {
   }
 }
 
+// Mesma normalização do worker (tira acento, "(VENDEDOR 2)", caixa)
+function normNomeFront(n) {
+  return (n||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\([^)]*\)/g,'')
+    .replace(/\s+/g,' ').trim().toUpperCase();
+}
+
 function getSellerVendas(data, vendedor) {
   var result = {aparelhos:0, servicos:0, valor:0};
   if (!data || !data.vendas) return result;
-  vendedor.nomesGC.forEach(function(nomeGC) {
-    var v = data.vendas[nomeGC];
-    if (v) { result.aparelhos += v.aparelhos||0; result.servicos += v.servicos||0; result.valor += v.valor||0; }
+  var idx = data.indexNomes || {};
+  // Resolve os nomes cadastrados -> ids (junta variantes do mesmo vendedor)
+  var ids = {};
+  (vendedor.nomesGC||[]).forEach(function(nomeGC) {
+    var key = normNomeFront(nomeGC);
+    var arr = idx[key] || [];
+    arr.forEach(function(id){ ids[id] = true; });
+  });
+  Object.keys(ids).forEach(function(id) {
+    var e = data.vendas[id];
+    if (e) { result.aparelhos += e.aparelhos||0; result.servicos += e.servicos||0; result.valor += e.valor||0; }
   });
   return result;
 }
@@ -1192,9 +1202,7 @@ export default {
     if (url.pathname === '/api/vendas') {
       if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
       const mes = url.searchParams.get('mes');
-      // debug=1 inclui __sem_nome__ no payload (vendas órfãs após o mapeamento por id)
       const debugParam = url.searchParams.get('debug');
-      const debug = debugParam === '1';
       if (!mes) return new Response(JSON.stringify({error:'mes obrigatorio'}),{status:400,headers:cors});
 
       // debug=2: diagnóstico cru. Bate em cada loja (página 1) e mostra status HTTP,
@@ -1290,13 +1298,13 @@ export default {
         const atual = [...v1,...v2,...v3];
         const ant   = [...a1,...a2,...a3];
 
-        // Lookup id->nome montado a partir dos dois meses (mais robusto)
-        const idMap = buildIdMap([atual, ant]);
+        const gAtual = group(atual);
+        const gAnt   = group(ant);
 
         return new Response(JSON.stringify({
           success: true,
-          mesAtual:    { mes,         vendas: group(atual, idMap, debug) },
-          mesAnterior: { mes: mesAnt, vendas: group(ant,   idMap, false) },
+          mesAtual:    { mes,         vendas: gAtual.vendas, indexNomes: gAtual.indexNomes },
+          mesAnterior: { mes: mesAnt, vendas: gAnt.vendas,   indexNomes: gAnt.indexNomes },
         }),{headers:cors});
       } catch(e) {
         return new Response(JSON.stringify({error:e.message}),{status:500,headers:cors});
