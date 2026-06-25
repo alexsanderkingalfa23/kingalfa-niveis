@@ -1193,8 +1193,56 @@ export default {
       if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
       const mes = url.searchParams.get('mes');
       // debug=1 inclui __sem_nome__ no payload (vendas órfãs após o mapeamento por id)
-      const debug = url.searchParams.get('debug') === '1';
+      const debugParam = url.searchParams.get('debug');
+      const debug = debugParam === '1';
       if (!mes) return new Response(JSON.stringify({error:'mes obrigatorio'}),{status:400,headers:cors});
+
+      // debug=2: diagnóstico cru. Bate em cada loja (página 1) e mostra status HTTP,
+      // se os tokens estão configurados, quantas vendas vieram e quais situações.
+      // Serve pra descobrir POR QUE o ranking vem vazio.
+      if (debugParam === '2') {
+        const [yy,mm] = mes.split('-');
+        const ultimoD = new Date(parseInt(yy), parseInt(mm), 0).getDate();
+        const inicioD = mes+'-01';
+        const fimD    = mes+'-'+ultimoD;
+        const diag = [];
+        for (const loja of LOJAS) {
+          const u = GC_BASE+'/vendas?data_inicio='+inicioD+'&data_fim='+fimD+'&loja_id='+loja.id+'&limite=100&pagina=1';
+          const entry = {loja: loja.id};
+          try {
+            const res = await fetch(u, {headers:{
+              'access-token': env.GC_ACCESS_TOKEN,
+              'secret-access-token': env.GC_SECRET_TOKEN,
+              'Content-Type':'application/json'
+            }});
+            entry.httpStatus = res.status;
+            const j = await res.json();
+            entry.chavesTopo = Object.keys(j);
+            entry.meta = j.meta || null;
+            const items = j.data || [];
+            entry.qtd = items.length;
+            const sits = {};
+            items.forEach(function(v){ var s=(v.nome_situacao||'(vazio)'); sits[s]=(sits[s]||0)+1; });
+            entry.situacoes = sits;
+            if (items[0]) {
+              entry.amostra = {
+                nome_vendedor: items[0].nome_vendedor,
+                vendedor_id:   items[0].vendedor_id,
+                nome_situacao: items[0].nome_situacao,
+                valor_total:   items[0].valor_total,
+                campos:        Object.keys(items[0])
+              };
+            }
+          } catch(e) { entry.erro = e.message; }
+          diag.push(entry);
+        }
+        return new Response(JSON.stringify({
+          tokensConfigurados: { access: !!env.GC_ACCESS_TOKEN, secret: !!env.GC_SECRET_TOKEN },
+          periodo: { inicio: inicioD, fim: fimD },
+          lojas: diag
+        }, null, 2), {headers:cors});
+      }
+
       try {
         const [y,m] = mes.split('-').map(Number);
         const mesAnt = m===1 ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0');
