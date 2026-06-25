@@ -741,6 +741,23 @@ async function renderGeral() {
       '<td style="min-width:90px">'+nxtHtml+'</td></tr>';
   }).join('');
 
+  var rcards = sellerStats.map(function(sk,i) {
+    var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'#'+(i+1);
+    var vStr = 'R$ '+Math.round(sk.valor||0).toLocaleString('pt-BR');
+    return '<div class="rcard">'+
+      '<div class="rcard-pos">'+medal+'</div>'+
+      '<div class="rcard-body">'+
+        '<div class="rcard-name"><span class="vname-pill">'+sk.v.nome+'</span></div>'+
+        '<div class="rcard-meta">'+sk.u.nome+'</div>'+
+        '<div class="rcard-nums">'+
+          '<span class="rcard-val">'+vStr+'</span>'+
+          '<span class="rcard-ap">'+sk.aparelhos+' ap.</span>'+
+          '<span class="badge be">'+sk.lvl.nome+'</span>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }).join('');
+
   g('geral-content').innerHTML =
     '<div class="hero-stats">'+
     '<div class="hstat"><div class="hsl">Total aparelhos</div><div class="hsv">'+totalAp+'</div><div class="hss">mês atual</div></div>'+
