@@ -35,17 +35,23 @@ function classify(sit) {
   return s === 'CONCRETIZADA' ? 'servico' : 'aparelho';
 }
 
-function group(vendas) {
+function group(vendas, debug) {
   const r = {};
+  const sem_nome = [];
   for (const v of vendas) {
     const nome = (v.nome_vendedor||'').trim();
     const tipo = classify(v.nome_situacao||'');
-    if (!tipo||!nome) continue;
-    if (!r[nome]) r[nome] = {aparelhos:0,servicos:0,valor:0};
+    if (!tipo) continue;
+    if (!nome) {
+      if(debug) sem_nome.push({id:v.vendedor_id, sit:v.nome_situacao, val:v.valor_total});
+      continue;
+    }
+    if (!r[nome]) r[nome] = {aparelhos:0,servicos:0,valor:0,vendedor_id:v.vendedor_id};
     if (tipo==='aparelho') r[nome].aparelhos++;
     else r[nome].servicos++;
     r[nome].valor += parseFloat(v.valor_total||0);
   }
+  if(debug) r['__sem_nome__'] = sem_nome;
   return r;
 }
 
@@ -58,6 +64,7 @@ export default {
     if (url.pathname === '/api/vendas') {
       if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
       const mes = url.searchParams.get('mes');
+      const debug = url.searchParams.get('debug') === '1';
       if (!mes) return new Response(JSON.stringify({error:'mes obrigatorio'}),{status:400,headers:cors});
       try {
         const [y,m] = mes.split('-').map(Number);
