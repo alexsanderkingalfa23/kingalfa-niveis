@@ -35,17 +35,45 @@ function classify(sit) {
   return s === 'CONCRETIZADA' ? 'servico' : 'aparelho';
 }
 
-function group(vendas, debug) {
+// Monta lookup vendedor_id -> nome a partir das vendas que TÊM os dois campos.
+// Usado pra preencher o nome das vendas que vierem só com vendedor_id.
+function buildIdMap(arrays) {
+  const idToNome = {};
+  for (const arr of arrays) {
+    for (const v of arr) {
+      const nome = (v.nome_vendedor||'').trim();
+      const vid  = v.vendedor_id;
+      if (nome && vid != null && vid !== '' && !idToNome[vid]) {
+        idToNome[vid] = nome;
+      }
+    }
+  }
+  return idToNome;
+}
+
+function group(vendas, idToNome, debug) {
   const r = {};
   const sem_nome = [];
   for (const v of vendas) {
-    const nome = (v.nome_vendedor||'').trim();
     const tipo = classify(v.nome_situacao||'');
     if (!tipo) continue;
+
+    let nome = (v.nome_vendedor||'').trim();
+
+    // Backfill: se não tem nome mas tem vendedor_id conhecido, recupera o nome
+    if (!nome) {
+      const vid = v.vendedor_id;
+      if (vid != null && vid !== '' && idToNome[vid]) {
+        nome = idToNome[vid];
+      }
+    }
+
+    // Ainda sem nome = venda realmente órfã (sem vendedor_id ou id nunca nomeado)
     if (!nome) {
       if (debug) sem_nome.push({vendedor_id: v.vendedor_id, sit: v.nome_situacao, val: v.valor_total});
       continue;
     }
+
     if (!r[nome]) r[nome] = {aparelhos:0, servicos:0, valor:0, vendedor_id: v.vendedor_id};
     if (tipo==='aparelho') r[nome].aparelhos++;
     else r[nome].servicos++;
@@ -434,7 +462,7 @@ tbody tr:hover td{background:#FFF9F4}
 var PROGRAMA_INICIO = '2026-07';
 var JSONBIN_ID  = '6a3bdd8bf5f4af5e292909de';
 var JSONBIN_KEY = '$2a$10$WzIxNTgN9XRQfPCpGeVPoODb0VwvPbZoZcVT6nRkodWl01uzLgvXW';
-var API_BASE    = '/.netlify/functions';  // vazio = mesmo domínio (Vercel)
+var API_BASE    = '/api';  // Cloudflare Workers — mesmo domínio
 
 // ══════════════════════════════════════════════
 // DADOS INICIAIS (JSONBin)
@@ -477,7 +505,7 @@ var DEFAULT_DATA = {
 // ══════════════════════════════════════════════
 var appData = null;
 var currentUser = null; // {id, nome, isAdmin}
-var vendaCache = {}; // mes -> {unidadeId -> {aparelhos, servicos por nome}}
+var vendaCache = {}; // mes -> resposta da API
 var pinBuffer = '';
 var selectedSellerId = null;
 
@@ -525,7 +553,7 @@ async function saveData() {
 // ══════════════════════════════════════════════
 async function fetchVendas(mes) {
   if (vendaCache[mes]) return vendaCache[mes];
-  
+
   try {
     var url = API_BASE+'/vendas?mes='+mes+'&t='+Date.now();
     var r = await fetch(url);
@@ -736,18 +764,14 @@ async function renderGeral() {
   var unidades = appData.unidades;
   var vendedores = appData.vendedores;
 
-  // Fetch vendas for all units
-  var vendaData = {};
-  await Promise.all(unidades.map(async function(u) {
-    allData = await fetchVendas(mes);
-  }));
+  // O worker já agrega as 3 lojas numa resposta só
+  var allData = await fetchVendas(mes);
 
   // Build seller stats
   var sellerStats = vendedores.map(function(v) {
     var u = getUnidade(v.unidadeId);
-    var data = allData;
-    var atualData = getSellerVendas(data.mesAtual, v);
-    var anteriorData = getSellerVendas(data.mesAnterior, v);
+    var atualData = getSellerVendas(allData.mesAtual, v);
+    var anteriorData = getSellerVendas(allData.mesAnterior, v);
     var nivelCalc = calcNivel(v, atualData, anteriorData, mes);
     var lvl = niveis[nivelCalc.nivel]||niveis[0];
     return {
@@ -772,30 +796,50 @@ async function renderGeral() {
   var mediaAp = sellerStats.length ? Math.round(totalAp/sellerStats.length) : 0;
   var best = sellerStats[0];
 
-  // Render
+  // Cards de unidade (Líder / 2ª / 3ª)
   var uc = unitStats.map(function(us,i) {
+    var label = i===0 ? 'Líder' : (i+1)+'ª';
     return '<div class="ucard-o'+(i===0?' lead':'')+'">'+
-      '<div class="ucard-o-label">'+(i===0?'Líder':''+('2ª','3ª')[i-1]||'')+'</div>'+
+      '<div class="ucard-o-label">'+label+'</div>'+
       '<div class="ucard-o-name">'+us.u.nome+'</div>'+
       '<div class="ucard-o-meta">'+us.totalAp+' ap. · '+us.count+' vend.</div>'+
     '</div>';
   }).join('');
 
+  // Linhas da tabela (desktop)
   var rows = sellerStats.map(function(s,i) {
     var nx = niveis[s.nivelId+1];
-    var pct = nx ? Math.min(100,Math.round(s.aparelhos/nx.minAp*100)) : 100; var valorStr = 'R$ '+Math.round(s.valor||0).toLocaleString('pt-BR');
+    var pct = nx ? Math.min(100,Math.round(s.aparelhos/nx.minAp*100)) : 100;
+    var valorStr = 'R$ '+Math.round(s.valor||0).toLocaleString('pt-BR');
     var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'#'+(i+1);
     var nxtHtml = nx
       ? '<span style="font-size:11px;color:#9CA3AF">'+s.aparelhos+'/'+nx.minAp+'</span>'+
         '<div class="pb"><div class="pf" style="width:'+pct+'%;background:#F07800"></div></div>'
       : '<span style="font-size:11px;font-weight:700;color:#F07800">👑 Rei</span>';
-    var rowClass = '';
-    return '<tr'+rowClass+'><td style="font-weight:700;font-size:15px">'+medal+'</td>'+
+    return '<tr><td style="font-weight:700;font-size:15px">'+medal+'</td>'+
       '<td><span class="vname-pill">'+s.v.nome+'</span></td>'+
       '<td style="font-size:12px;color:#9CA3AF">'+s.u.nome+'</td>'+
       '<td><span class="badge '+s.lvl.nome.toLowerCase().split(' ')[0].replace('escudeiro','be').replace('cavaleiro','bc').replace('duque','bd2').replace('rei','br')+'">'+s.lvl.nome+'</span></td>'+
-      '<td style="font-weight:700;font-size:13px;color:#F07800">'+valorStr+'</td>'+'<td style="font-weight:700;color:#111">'+s.aparelhos+'</td>'+
+      '<td style="font-weight:700;font-size:13px;color:#F07800">'+valorStr+'</td>'+
+      '<td style="font-weight:700;color:#111">'+s.aparelhos+'</td>'+
       '<td style="min-width:90px">'+nxtHtml+'</td></tr>';
+  }).join('');
+
+  // Cards do ranking (mobile)
+  var rcards = sellerStats.map(function(s,i) {
+    var valorStr = 'R$ '+Math.round(s.valor||0).toLocaleString('pt-BR');
+    var medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':'#'+(i+1);
+    return '<div class="rcard">'+
+      '<div class="rcard-pos">'+medal+'</div>'+
+      '<div class="rcard-body">'+
+      '<div class="rcard-name"><span class="vname-pill">'+s.v.nome+'</span></div>'+
+      '<div class="rcard-meta">'+s.u.nome+' · '+s.lvl.nome+'</div>'+
+      '<div class="rcard-nums">'+
+      '<span class="rcard-val">'+valorStr+'</span>'+
+      '<span class="rcard-ap">'+s.aparelhos+' ap.</span>'+
+      '</div>'+
+      '</div>'+
+    '</div>';
   }).join('');
 
   g('geral-content').innerHTML =
@@ -811,7 +855,8 @@ async function renderGeral() {
     '<div class="sec-title" style="margin-top:16px"><i class="ti ti-list-numbers"></i> Ranking Individual</div>'+
     '<div class="rank-table-wrap"><table><thead><tr>'+
     '<th>#</th><th>Vendedor</th><th>Unidade</th><th>Nível</th><th>Valor</th><th>Ap.</th><th>Próximo</th>'+
-    '</tr></thead><tbody>'+rows+'</tbody></table></div>'+    '<div class="rank-cards">'+rcards+'</div>';
+    '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+    '<div class="rank-cards">'+rcards+'</div>';
 
   g('geral-loading').style.display='none';
   g('geral-content').style.display='block';
@@ -831,7 +876,7 @@ async function renderInd() {
   var data = await fetchVendas(mes);
   var atualData    = getSellerVendas(data.mesAtual, v);
   var anteriorData = getSellerVendas(data.mesAnterior, v);
-  var nivelCalc = calcNivel(v, atualData, anteriorData);
+  var nivelCalc = calcNivel(v, atualData, anteriorData, mes);
   var lvl  = niveis[nivelCalc.nivel]||niveis[0];
   var nx   = niveis[nivelCalc.nivel+1];
   var pv   = nivelCalc.nivel>0 ? niveis[nivelCalc.nivel-1] : null;
@@ -1102,21 +1147,18 @@ async function syncGestaoClick() {
     var niveis = appData.config.niveis;
     vendaCache = {};
 
-    await Promise.all(appData.unidades.map(async function(u) {
-      var data = await fetchVendas(mes);
-      appData.vendedores.forEach(function(v) {
-        if (v.unidadeId !== u.id) return;
-        var atualData    = getSellerVendas(data.mesAtual, v);
-        var anteriorData = getSellerVendas(data.mesAnterior, v);
-        var nivelCalc = calcNivel(v, atualData, anteriorData);
-        v.nivelAtual = nivelCalc.nivel;
-        // Update consecutive months
-        var lvl = niveis[v.nivelAtual]||niveis[0];
-        var nx  = niveis[v.nivelAtual+1];
-        v.mesesAcima  = (nx && atualData.aparelhos >= nx.minAp) ? (v.mesesAcima||0)+1 : 0;
-        v.mesesAbaixo = (atualData.aparelhos < lvl.minAp) ? (v.mesesAbaixo||0)+1 : 0;
-      });
-    }));
+    var data = await fetchVendas(mes);
+    appData.vendedores.forEach(function(v) {
+      var atualData    = getSellerVendas(data.mesAtual, v);
+      var anteriorData = getSellerVendas(data.mesAnterior, v);
+      var nivelCalc = calcNivel(v, atualData, anteriorData, mes);
+      v.nivelAtual = nivelCalc.nivel;
+      // Update consecutive months
+      var lvl = niveis[v.nivelAtual]||niveis[0];
+      var nx  = niveis[v.nivelAtual+1];
+      v.mesesAcima  = (nx && atualData.aparelhos >= nx.minAp) ? (v.mesesAcima||0)+1 : 0;
+      v.mesesAbaixo = (atualData.aparelhos < lvl.minAp) ? (v.mesesAbaixo||0)+1 : 0;
+    });
 
     await saveData();
     msg.className='sync-msg ok';
@@ -1150,6 +1192,7 @@ export default {
     if (url.pathname === '/api/vendas') {
       if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
       const mes = url.searchParams.get('mes');
+      // debug=1 inclui __sem_nome__ no payload (vendas órfãs após o mapeamento por id)
       const debug = url.searchParams.get('debug') === '1';
       if (!mes) return new Response(JSON.stringify({error:'mes obrigatorio'}),{status:400,headers:cors});
       try {
@@ -1165,10 +1208,14 @@ export default {
         ]);
         const atual = [...v1,...v2,...v3];
         const ant   = [...a1,...a2,...a3];
+
+        // Lookup id->nome montado a partir dos dois meses (mais robusto)
+        const idMap = buildIdMap([atual, ant]);
+
         return new Response(JSON.stringify({
           success: true,
-          mesAtual:    { mes,      vendas: group(atual, debug) },
-          mesAnterior: { mes: mesAnt, vendas: group(ant, false) },
+          mesAtual:    { mes,         vendas: group(atual, idMap, debug) },
+          mesAnterior: { mes: mesAnt, vendas: group(ant,   idMap, false) },
         }),{headers:cors});
       } catch(e) {
         return new Response(JSON.stringify({error:e.message}),{status:500,headers:cors});
