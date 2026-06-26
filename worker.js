@@ -30,11 +30,12 @@ async function fetchVendasMes(mes, lojaId, env) {
     return all;
   }
 
-  const [vProd, vBalc] = await Promise.all([
-    puxarTipo('produto'),
-    puxarTipo('vendas_balcao')
-  ]);
-  return vProd.concat(vBalc);
+  const [vProd, vServ, vBalc] = await Promise.all([
+  puxarTipo('produto'),
+  puxarTipo('servico'),
+  puxarTipo('vendas_balcao')
+]);
+return vProd.concat(vServ).concat(vBalc);
 }
 
 function classify(sit) {
