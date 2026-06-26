@@ -36,6 +36,7 @@ async function fetchVendasMes(mes, lojaId, env) {
   ]);
   return vProd.concat(vBalc);
 }
+
 function classify(sit) {
   if (!sit) return null;
   const s = sit.trim().toUpperCase();
