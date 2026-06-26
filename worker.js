@@ -51,6 +51,15 @@ function normNome(n) {
     .replace(/\s+/g,' ').trim().toUpperCase();
 }
 
+function classify(sit, tipoGC) {
+  if (!sit) return null;
+  const s = sit.trim().toUpperCase();
+  if (!s.startsWith('CONCRETIZADA')) return null;
+  if (s !== 'CONCRETIZADA') return 'aparelho';
+  if (tipoGC === 'vendas_balcao') return 'balcao';
+  return 'servico';
+}
+
 // Agrupa por vendedor_id (estável). Retorna:
 //   vendas: { [id]: {aparelhos, servicos, valor, nomes:[...]} }
 //   indexNomes: { [nomeNormalizado]: [id, ...] }  <- usado pra casar nome -> id
