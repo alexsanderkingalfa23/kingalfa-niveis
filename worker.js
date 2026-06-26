@@ -1337,6 +1337,53 @@ export default {
     lojasCadastradasNoGestaoClick: j,
     lojasConfiguradasNoApp: LOJAS.map(function(l){ return l.id; })
   }, null, 2), {headers:cors});
+}if (debugParam === '6') {
+  // Puxa vendas do mês especificamente da loja 559864 (FINANCEIRO)
+  // pra ver se é lá que cai o balcão "Consumidor"
+  const [yy,mm] = mes.split('-');
+  const ultimoD = new Date(parseInt(yy), parseInt(mm), 0).getDate();
+  const inicioD = mes+'-01';
+  const fimD    = mes+'-'+ultimoD;
+  let page=1, all=[], hasMore=true, guard=0;
+  while (hasMore && guard++ < 60) {
+    const u = GC_BASE+'/vendas?data_inicio='+inicioD+'&data_fim='+fimD+'&loja_id=559864&limite=100&pagina='+page;
+    const res = await fetch(u, {headers:{
+      'access-token': env.GC_ACCESS_TOKEN,
+      'secret-access-token': env.GC_SECRET_TOKEN,
+      'Content-Type':'application/json'
+    }});
+    const j = await res.json();
+    const items = j.data || [];
+    all = all.concat(items);
+    const total = parseInt((j.meta||{}).total_registros || 0);
+    hasMore = items.length === 100 && all.length < total;
+    page++;
+  }
+  const porVendedor = {};
+  const situacoes = {};
+  const amostraClientes = [];
+  all.forEach(function(v){
+    const nm = (v.nome_vendedor||'(sem vendedor)');
+    porVendedor[nm] = (porVendedor[nm]||0)+1;
+    const s = (v.nome_situacao||'(vazio)');
+    situacoes[s] = (situacoes[s]||0)+1;
+    if (amostraClientes.length < 10) {
+      amostraClientes.push({
+        cliente: v.nome_cliente || v.cliente || '(sem cliente)',
+        vendedor: v.nome_vendedor || '(sem vendedor)',
+        situacao: v.nome_situacao,
+        valor: v.valor_total,
+        data: v.data
+      });
+    }
+  });
+  return new Response(JSON.stringify({
+    lojaTestada: '559864 (FINANCEIRO)',
+    totalVendas: all.length,
+    porVendedor: porVendedor,
+    situacoes: situacoes,
+    amostraClientes: amostraClientes
+  }, null, 2), {headers:cors});
 }
 
       try {
