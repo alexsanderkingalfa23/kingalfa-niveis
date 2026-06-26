@@ -375,17 +375,28 @@ tr.me .vname-pill{border-color:var(--ka)}
 <div id="screen-changepin">
   <div class="login-card">
     <div style="font-size:18px;font-weight:800;color:var(--text);margin-bottom:6px">Altere seu PIN</div>
-    <div style="font-size:13px;color:var(--text3);margin-bottom:20px">Este é seu primeiro acesso. Defina um PIN de 4 dígitos.</div>
-    <div style="margin-bottom:12px">
-      <label class="fl">Novo PIN</label>
-      <input type="password" id="new-pin1" class="fi" maxlength="4" placeholder="••••">
+    <div style="font-size:13px;color:var(--text3);margin-bottom:20px">Primeiro acesso. Defina um PIN de 4 dígitos.</div>
+    <div class="pin-name" id="changepin-stepname">Novo PIN</div>
+    <div class="pin-hint" id="changepin-hint">Digite 4 dígitos</div>
+    <div class="pin-dots">
+      <div class="pin-dot" id="cpd0"></div><div class="pin-dot" id="cpd1"></div>
+      <div class="pin-dot" id="cpd2"></div><div class="pin-dot" id="cpd3"></div>
     </div>
-    <div style="margin-bottom:16px">
-      <label class="fl">Confirmar PIN</label>
-      <input type="password" id="new-pin2" class="fi" maxlength="4" placeholder="••••">
+    <div class="pin-pad">
+      <button class="pin-key" onclick="changePinKey('1')">1</button>
+      <button class="pin-key" onclick="changePinKey('2')">2</button>
+      <button class="pin-key" onclick="changePinKey('3')">3</button>
+      <button class="pin-key" onclick="changePinKey('4')">4</button>
+      <button class="pin-key" onclick="changePinKey('5')">5</button>
+      <button class="pin-key" onclick="changePinKey('6')">6</button>
+      <button class="pin-key" onclick="changePinKey('7')">7</button>
+      <button class="pin-key" onclick="changePinKey('8')">8</button>
+      <button class="pin-key" onclick="changePinKey('9')">9</button>
+      <button class="pin-key" style="visibility:hidden"></button>
+      <button class="pin-key" onclick="changePinKey('0')">0</button>
+      <button class="pin-key del" onclick="changePinDel()"><i class="ti ti-backspace"></i></button>
     </div>
-    <div id="changepin-err" style="color:var(--red);font-size:12px;margin-bottom:10px;min-height:18px"></div>
-    <button class="btn btn-p" style="width:100%" onclick="savePinChange()">Salvar PIN</button>
+    <div class="pin-error" id="changepin-err"></div>
   </div>
 </div>
 
@@ -713,6 +724,7 @@ async function checkPin() {
   if (hash === v.pin) {
     if (v.pinInicial) {
       currentUser = {id:v.id, nome:v.nome, isAdmin:false};
+      resetChangePin();
       showScreen('changepin');
     } else {
       loginSuccess({id:v.id, nome:v.nome, isAdmin:false});
@@ -723,16 +735,61 @@ async function checkPin() {
   }
 }
 
-async function savePinChange() {
-  var p1 = g('new-pin1').value, p2 = g('new-pin2').value;
+// ========== CHANGE-PIN (PIN-pad em 2 etapas) ==========
+var changePinStep = 1;
+var changePinBuffer = '';
+var changePinFirst = '';
+
+function resetChangePin() {
+  changePinStep = 1;
+  changePinBuffer = '';
+  changePinFirst = '';
+  g('changepin-stepname').textContent = 'Novo PIN';
+  g('changepin-hint').textContent = 'Digite 4 dígitos';
   g('changepin-err').textContent = '';
-  if (p1.length !== 4 || !/^\d+$/.test(p1)) { g('changepin-err').textContent = 'PIN deve ter 4 dígitos numéricos'; return; }
-  if (p1 !== p2) { g('changepin-err').textContent = 'PINs não coincidem'; return; }
-  var hash = await sha256(p1);
-  var v = getVendedor(currentUser.id);
-  v.pin = hash; v.pinInicial = false;
-  await saveData();
-  loginSuccess(currentUser);
+  updateChangePinDots();
+}
+
+function updateChangePinDots() {
+  for (var i=0;i<4;i++) g('cpd'+i).classList.toggle('filled', i < changePinBuffer.length);
+}
+
+function changePinKey(k) {
+  if (changePinBuffer.length >= 4) return;
+  changePinBuffer += k;
+  updateChangePinDots();
+  g('changepin-err').textContent = '';
+  if (changePinBuffer.length === 4) setTimeout(advanceChangePin, 150);
+}
+
+function changePinDel() {
+  if (changePinBuffer.length > 0) {
+    changePinBuffer = changePinBuffer.slice(0,-1);
+    updateChangePinDots();
+  }
+}
+
+async function advanceChangePin() {
+  if (changePinStep === 1) {
+    changePinFirst = changePinBuffer;
+    changePinBuffer = '';
+    changePinStep = 2;
+    g('changepin-stepname').textContent = 'Confirme o PIN';
+    g('changepin-hint').textContent = 'Digite o mesmo PIN de novo';
+    updateChangePinDots();
+  } else {
+    if (changePinBuffer !== changePinFirst) {
+      g('changepin-err').textContent = 'PINs não coincidem. Começando de novo.';
+      setTimeout(resetChangePin, 1500);
+      return;
+    }
+    var pin = changePinBuffer;
+    var hash = await sha256(pin);
+    var v = getVendedor(currentUser.id);
+    v.pin = hash; v.pinInicial = false;
+    try { await saveData(); } catch(e){}
+    loginSuccess(currentUser);
+  }
 }
 
 function loginSuccess(user) {
@@ -1176,6 +1233,24 @@ async function syncGestaoClick() {
     msg.innerHTML='<i class="ti ti-alert-circle"></i> Erro: '+e.message;
   }
 }
+
+// Suporte a teclado físico (notebook): captura 0-9 e Backspace nas telas de PIN
+document.addEventListener('keydown', function(e) {
+  var loginEl = g('screen-login');
+  var changeEl = g('screen-changepin');
+  var pinStepEl = g('pin-step');
+  var loginVisible = loginEl && loginEl.style.display === 'flex';
+  var changeVisible = changeEl && changeEl.style.display === 'flex';
+  var pinStepVisible = pinStepEl && pinStepEl.style.display === 'block';
+
+  if (loginVisible && pinStepVisible) {
+    if (e.key >= '0' && e.key <= '9') { pinKey(e.key); e.preventDefault(); }
+    else if (e.key === 'Backspace') { pinDel(); e.preventDefault(); }
+  } else if (changeVisible) {
+    if (e.key >= '0' && e.key <= '9') { changePinKey(e.key); e.preventDefault(); }
+    else if (e.key === 'Backspace') { changePinDel(); e.preventDefault(); }
+  }
+});
 
 async function init() {
   showScreen('login');
