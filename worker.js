@@ -1324,7 +1324,20 @@ export default {
           lojasConfiguradasNoApp: lojasConfiguradas,
           porLoja: porLoja
         }, null, 2), {headers:cors});
-      }
+      } if (debugParam === '5') {
+  // Lista TODAS as lojas/PDVs cadastrados no Gestão Click
+  const res = await fetch(GC_BASE+'/lojas', {headers:{
+    'access-token': env.GC_ACCESS_TOKEN,
+    'secret-access-token': env.GC_SECRET_TOKEN,
+    'Content-Type':'application/json'
+  }});
+  const j = await res.json();
+  return new Response(JSON.stringify({
+    statusHTTP: res.status,
+    lojasCadastradasNoGestaoClick: j,
+    lojasConfiguradasNoApp: LOJAS.map(function(l){ return l.id; })
+  }, null, 2), {headers:cors});
+}
 
       try {
         const [y,m] = mes.split('-').map(Number);
