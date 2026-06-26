@@ -40,21 +40,6 @@ async function fetchVendasMes(mes, lojaId, env) {
   return vProd.concat(vServ).concat(vBalc);
 }
 
-  const [vProd, vServ, vBalc] = await Promise.all([
-  puxarTipo('produto'),
-  puxarTipo('servico'),
-  puxarTipo('vendas_balcao')
-]);
-return vProd.concat(vServ).concat(vBalc);
-}
-
-function classify(sit) {
-  if (!sit) return null;
-  const s = sit.trim().toUpperCase();
-  if (!s.startsWith('CONCRETIZADA')) return null;
-  return s === 'CONCRETIZADA' ? 'servico' : 'aparelho';
-}
-
 // Monta lookup vendedor_id -> nome a partir das vendas que TÊM os dois campos.
 // Usado pra preencher o nome das vendas que vierem só com vendedor_id.
 // Normaliza o nome do vendedor pra casar variantes:
