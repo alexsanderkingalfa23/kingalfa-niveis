@@ -10,22 +10,34 @@ async function fetchVendasMes(mes, lojaId, env) {
   const ultimo = new Date(parseInt(year), parseInt(month), 0).getDate();
   const inicio = year + '-' + month + '-01';
   const fim    = year + '-' + month + '-' + ultimo;
-  let page = 1, all = [], hasMore = true;
-  while (hasMore) {
-    const url = GC_BASE + '/vendas?data_inicio=' + inicio + '&data_fim=' + fim + '&loja_id=' + lojaId + '&limite=100&pagina=' + page;
-    const res = await fetch(url, { headers: {
-      'access-token': env.GC_ACCESS_TOKEN,
-      'secret-access-token': env.GC_SECRET_TOKEN,
-      'Content-Type': 'application/json'
-    }});
-    const json = await res.json();
-    const items = json.data || [];
-    all = all.concat(items);
-    const total = parseInt((json.meta||{}).total_registros || 0);
-    hasMore = items.length === 100 && all.length < total;
-    page++;
+
+  // Puxa um "tipo" (produto OU vendas_balcao) com paginação completa
+  async function puxarTipo(tipo) {
+    let page = 1, all = [], hasMore = true, guard = 0;
+    while (hasMore && guard++ < 100) {
+      const url = GC_BASE + '/vendas?tipo=' + tipo + '&data_inicio=' + inicio + '&data_fim=' + fim + '&loja_id=' + lojaId + '&limite=100&pagina=' + page;
+      const res = await fetch(url, { headers: {
+        'access-token': env.GC_ACCESS_TOKEN,
+        'secret-access-token': env.GC_SECRET_TOKEN,
+        'Content-Type': 'application/json'
+      }});
+      const json = await res.json();
+      const items = json.data || [];
+      all = all.concat(items);
+      const total = parseInt((json.meta||{}).total_registros || 0);
+      hasMore = items.length === 100 && all.length < total;
+      page++;
+    }
+    return all;
   }
-  return all;
+
+  // Faz as duas chamadas em paralelo: produtos (vendas normais) + balcão
+  const [vProd, vBalc] = await Promise.all([
+    puxarTipo('produto'),
+    puxarTipo('vendas_balcao')
+  ]);
+  return vProd.concat(vBalc);
+}
 }
 
 function classify(sit) {
