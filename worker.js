@@ -1429,6 +1429,46 @@ export default {
     };
   }
   return new Response(JSON.stringify(resultadoPorLoja, null, 2), {headers:cors});
+}if (debugParam === '8') {
+  // Testa endpoints candidatos pra venda de balcão/PDV
+  const [yy,mm] = mes.split('-');
+  const ultimoD = new Date(parseInt(yy), parseInt(mm), 0).getDate();
+  const inicioD = mes+'-01';
+  const fimD    = mes+'-'+ultimoD;
+  const candidatos = [
+    '/pdv',
+    '/balcao',
+    '/vendas-balcao',
+    '/vendas/balcao',
+    '/pdv/vendas',
+    '/caixa',
+    '/caixas',
+    '/vendas?tipo=balcao'
+  ];
+  const resultado = {};
+  for (const ep of candidatos) {
+    const sep = ep.includes('?') ? '&' : '?';
+    const u = GC_BASE+ep+sep+'data_inicio='+inicioD+'&data_fim='+fimD+'&limite=5&pagina=1';
+    try {
+      const res = await fetch(u, {headers:{
+        'access-token': env.GC_ACCESS_TOKEN,
+        'secret-access-token': env.GC_SECRET_TOKEN,
+        'Content-Type':'application/json'
+      }});
+      let body = null;
+      try { body = await res.json(); } catch(e) { body = '(resposta não-JSON)'; }
+      resultado[ep] = {
+        statusHTTP: res.status,
+        totalRegistros: body && body.meta ? body.meta.total_registros : null,
+        qtdNaPaginaAtual: body && body.data ? body.data.length : null,
+        amostraPrimeiroRegistro: body && body.data && body.data[0] ? body.data[0] : null,
+        respostaCrua: (!body || !body.data) ? body : undefined
+      };
+    } catch(e) {
+      resultado[ep] = { erro: e.message };
+    }
+  }
+  return new Response(JSON.stringify(resultado, null, 2), {headers:cors});
 }
 
       try {
