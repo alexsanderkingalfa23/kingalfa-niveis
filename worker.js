@@ -1284,6 +1284,48 @@ export default {
         }, null, 2), {headers:cors});
       }
 
+      // debug=3: puxa o mês SEM filtro de loja. Revela vendas em lojas/PDV não
+      // configurados (ex.: o balcão "Consumidor"). Quebra por nome_loja + situação.
+      if (debugParam === '3') {
+        const [yy,mm] = mes.split('-');
+        const ultimoD = new Date(parseInt(yy), parseInt(mm), 0).getDate();
+        const inicioD = mes+'-01';
+        const fimD    = mes+'-'+ultimoD;
+        let page=1, all=[], hasMore=true, guard=0;
+        while (hasMore && guard++ < 60) {
+          const u = GC_BASE+'/vendas?data_inicio='+inicioD+'&data_fim='+fimD+'&limite=100&pagina='+page;
+          const res = await fetch(u, {headers:{
+            'access-token': env.GC_ACCESS_TOKEN,
+            'secret-access-token': env.GC_SECRET_TOKEN,
+            'Content-Type':'application/json'
+          }});
+          const j = await res.json();
+          const items = j.data || [];
+          all = all.concat(items);
+          const total = parseInt((j.meta||{}).total_registros || 0);
+          hasMore = items.length === 100 && all.length < total;
+          page++;
+        }
+        const porLoja = {};
+        all.forEach(function(v){
+          const k = (v.nome_loja||'(sem nome_loja)');
+          if (!porLoja[k]) porLoja[k] = { qtd:0, valor:0, situacoes:{}, lojaIds:{} };
+          porLoja[k].qtd++;
+          porLoja[k].valor += parseFloat(v.valor_total||0);
+          const s = (v.nome_situacao||'(vazio)');
+          porLoja[k].situacoes[s] = (porLoja[k].situacoes[s]||0)+1;
+          const lid = v.loja_id!=null ? String(v.loja_id) : '?';
+          porLoja[k].lojaIds[lid] = (porLoja[k].lojaIds[lid]||0)+1;
+        });
+        Object.keys(porLoja).forEach(function(k){ porLoja[k].valor = Math.round(porLoja[k].valor); });
+        const lojasConfiguradas = LOJAS.map(function(l){ return l.id; });
+        return new Response(JSON.stringify({
+          totalVendasMes: all.length,
+          lojasConfiguradasNoApp: lojasConfiguradas,
+          porLoja: porLoja
+        }, null, 2), {headers:cors});
+      }
+
       try {
         const [y,m] = mes.split('-').map(Number);
         const mesAnt = m===1 ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0');
