@@ -1469,6 +1469,57 @@ export default {
     }
   }
   return new Response(JSON.stringify(resultado, null, 2), {headers:cors});
+}if (debugParam === '9') {
+  // Testa tipo=vendas_balcao nas 3 lojas (conforme doc oficial Gestão Click)
+  const [yy,mm] = mes.split('-');
+  const ultimoD = new Date(parseInt(yy), parseInt(mm), 0).getDate();
+  const inicioD = mes+'-01';
+  const fimD    = mes+'-'+ultimoD;
+  const resultado = {};
+  for (const loja of LOJAS) {
+    let page=1, all=[], hasMore=true, guard=0;
+    while (hasMore && guard++ < 60) {
+      const u = GC_BASE+'/vendas?tipo=vendas_balcao&data_inicio='+inicioD+'&data_fim='+fimD+'&loja_id='+loja.id+'&limite=100&pagina='+page;
+      const res = await fetch(u, {headers:{
+        'access-token': env.GC_ACCESS_TOKEN,
+        'secret-access-token': env.GC_SECRET_TOKEN,
+        'Content-Type':'application/json'
+      }});
+      const j = await res.json();
+      const items = j.data || [];
+      all = all.concat(items);
+      const total = parseInt((j.meta||{}).total_registros || 0);
+      hasMore = items.length === 100 && all.length < total;
+      page++;
+    }
+    const porVendedor = {};
+    const situacoes = {};
+    let valorTotal = 0;
+    all.forEach(function(v){
+      const nm = (v.nome_vendedor||'(sem vendedor)');
+      porVendedor[nm] = (porVendedor[nm]||0)+1;
+      const s = (v.nome_situacao||'(vazio)');
+      situacoes[s] = (situacoes[s]||0)+1;
+      valorTotal += parseFloat(v.valor_total||0);
+    });
+    resultado[loja.id] = {
+      qtdVendas: all.length,
+      valorTotal: Math.round(valorTotal),
+      porVendedor: porVendedor,
+      situacoes: situacoes,
+      amostra: all.slice(0,3).map(function(v){
+        return {
+          codigo: v.codigo,
+          cliente: v.nome_cliente,
+          vendedor: v.nome_vendedor,
+          situacao: v.nome_situacao,
+          valor: v.valor_total,
+          data: v.data
+        };
+      })
+    };
+  }
+  return new Response(JSON.stringify(resultado, null, 2), {headers:cors});
 }
 
       try {
