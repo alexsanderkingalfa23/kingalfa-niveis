@@ -11,7 +11,6 @@ async function fetchVendasMes(mes, lojaId, env) {
   const inicio = year + '-' + month + '-01';
   const fim    = year + '-' + month + '-' + ultimo;
 
-  // Puxa um "tipo" (produto OU vendas_balcao) com paginação completa
   async function puxarTipo(tipo) {
     let page = 1, all = [], hasMore = true, guard = 0;
     while (hasMore && guard++ < 100) {
@@ -31,7 +30,6 @@ async function fetchVendasMes(mes, lojaId, env) {
     return all;
   }
 
-  // Faz as duas chamadas em paralelo: produtos (vendas normais) + balcão
   const [vProd, vBalc] = await Promise.all([
     puxarTipo('produto'),
     puxarTipo('vendas_balcao')
