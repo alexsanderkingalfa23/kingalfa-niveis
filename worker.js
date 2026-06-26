@@ -577,6 +577,13 @@ function normNome(n) {
     .replace(new RegExp('\\([^)]*\\)','g'),'')
     .replace(new RegExp('\\s+','g'),' ').trim().toUpperCase();
 }
+// Mesma normalização do worker (tira acento, "(VENDEDOR 2)", caixa)
+function normNomeFront(n) {
+  return (n||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(new RegExp('\\([^)]*\\)','g'),'')
+    .replace(new RegExp('\\s+','g'),' ').trim().toUpperCase();
+}
 function getSellerVendas(data, vendedor) {
   var result = {aparelhos:0, servicos:0, valor:0};
   if (!data || !data.vendas) return result;
