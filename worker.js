@@ -22,6 +22,8 @@ async function fetchVendasMes(mes, lojaId, env) {
       }});
       const json = await res.json();
       const items = json.data || [];
+      // Marca cada venda com o tipo da chamada
+      items.forEach(function(v){ v.__tipoGC = tipo; });
       all = all.concat(items);
       const total = parseInt((json.meta||{}).total_registros || 0);
       hasMore = items.length === 100 && all.length < total;
@@ -29,6 +31,14 @@ async function fetchVendasMes(mes, lojaId, env) {
     }
     return all;
   }
+
+  const [vProd, vServ, vBalc] = await Promise.all([
+    puxarTipo('produto'),
+    puxarTipo('servico'),
+    puxarTipo('vendas_balcao')
+  ]);
+  return vProd.concat(vServ).concat(vBalc);
+}
 
   const [vProd, vServ, vBalc] = await Promise.all([
   puxarTipo('produto'),
@@ -63,14 +73,23 @@ function group(vendas) {
   const r = {};
   const indexNomes = {};
   for (const v of vendas) {
-    const tipo = classify(v.nome_situacao||'');
-    if (!tipo) continue; // NF e qualquer situação que não seja "Concretizada*" ficam de fora
+    const tipo = classify(v.nome_situacao||'', v.__tipoGC);
+    if (!tipo) continue;
 
     const id = (v.vendedor_id != null && v.vendedor_id !== '') ? String(v.vendedor_id) : '__sem_id__';
-    if (!r[id]) r[id] = {aparelhos:0, servicos:0, valor:0, nomes:{}};
-    if (tipo==='aparelho') r[id].aparelhos++;
-    else r[id].servicos++;
-    r[id].valor += parseFloat(v.valor_total||0);
+    if (!r[id]) r[id] = {aparelhos:0, servicos:0, balcao:0, valor:0, valorAparelhos:0, valorServicos:0, valorBalcao:0, nomes:{}};
+    const valor = parseFloat(v.valor_total||0);
+    if (tipo==='aparelho') {
+      r[id].aparelhos++;
+      r[id].valorAparelhos += valor;
+    } else if (tipo==='servico') {
+      r[id].servicos++;
+      r[id].valorServicos += valor;
+    } else if (tipo==='balcao') {
+      r[id].balcao++;
+      r[id].valorBalcao += valor;
+    }
+    r[id].valor += valor;
 
     const nm = (v.nome_vendedor||'').trim();
     if (nm) {
@@ -82,7 +101,6 @@ function group(vendas) {
       }
     }
   }
-  // nomes: objeto -> lista
   Object.keys(r).forEach(function(id){ r[id].nomes = Object.keys(r[id].nomes); });
   return { vendas: r, indexNomes: indexNomes };
 }
@@ -599,10 +617,9 @@ function normNomeFront(n) {
   return out.replace(/  +/g, ' ').replace(/^ +| +$/g, '').toUpperCase();
 }
 function getSellerVendas(data, vendedor) {
-  var result = {aparelhos:0, servicos:0, valor:0};
+  var result = {aparelhos:0, servicos:0, balcao:0, valor:0, valorAparelhos:0, valorServicos:0, valorBalcao:0};
   if (!data || !data.vendas) return result;
   var idx = data.indexNomes || {};
-  // Resolve os nomes cadastrados -> ids (junta variantes do mesmo vendedor)
   var ids = {};
   (vendedor.nomesGC||[]).forEach(function(nomeGC) {
     var key = normNomeFront(nomeGC);
@@ -611,7 +628,15 @@ function getSellerVendas(data, vendedor) {
   });
   Object.keys(ids).forEach(function(id) {
     var e = data.vendas[id];
-    if (e) { result.aparelhos += e.aparelhos||0; result.servicos += e.servicos||0; result.valor += e.valor||0; }
+    if (e) {
+      result.aparelhos      += e.aparelhos||0;
+      result.servicos       += e.servicos||0;
+      result.balcao         += e.balcao||0;
+      result.valor          += e.valor||0;
+      result.valorAparelhos += e.valorAparelhos||0;
+      result.valorServicos  += e.valorServicos||0;
+      result.valorBalcao    += e.valorBalcao||0;
+    }
   });
   return result;
 }
@@ -941,13 +966,32 @@ async function renderInd() {
 
   var metaServicos = v.metaServicos || (u?u.metaServicos:null);
   var servicosHtml = '<div class="servicos-sec">'+
-    '<div class="servicos-hd">'+
-    '<div class="servicos-title">Produtos & Serviços</div>'+
-    (metaServicos ? '<div class="servicos-meta">Meta: '+metaServicos+'</div>' : '<div class="meta-undefined">Meta a definir</div>')+
+  '<div class="servicos-hd">'+
+  '<div class="servicos-title">Faturamento — '+fmtMes(mes)+'</div>'+
+  '</div>'+
+  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">'+
+    '<div style="background:#FFF7ED;border-radius:8px;padding:10px 12px;border-left:3px solid #F07800">'+
+      '<div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:4px">Aparelhos</div>'+
+      '<div style="font-size:16px;font-weight:800;color:#111">'+money(atualData.valorAparelhos)+'</div>'+
+      '<div style="font-size:11px;color:#9CA3AF;margin-top:2px">'+atualData.aparelhos+' un.</div>'+
     '</div>'+
-    '<div class="servicos-val">'+atualData.servicos+'</div>'+
-    '<div class="servicos-hint">'+(metaServicos ? (atualData.servicos+'/'+metaServicos+' — '+(atualData.servicos>=metaServicos?'✅ Meta atingida':'⚠️ Faltam '+(metaServicos-atualData.servicos))): 'Vendas não contam para o nível')+'</div>'+
-  '</div>';
+    '<div style="background:#EFF6FF;border-radius:8px;padding:10px 12px;border-left:3px solid #2563EB">'+
+      '<div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:4px">Serviços</div>'+
+      '<div style="font-size:16px;font-weight:800;color:#111">'+money(atualData.valorServicos)+'</div>'+
+      '<div style="font-size:11px;color:#9CA3AF;margin-top:2px">'+atualData.servicos+' un.</div>'+
+    '</div>'+
+    '<div style="background:#F0FDF4;border-radius:8px;padding:10px 12px;border-left:3px solid #16A34A">'+
+      '<div style="font-size:11px;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:4px">Balcão</div>'+
+      '<div style="font-size:16px;font-weight:800;color:#111">'+money(atualData.valorBalcao)+'</div>'+
+      '<div style="font-size:11px;color:#9CA3AF;margin-top:2px">'+atualData.balcao+' un.</div>'+
+    '</div>'+
+    '<div style="background:#111;border-radius:8px;padding:10px 12px">'+
+      '<div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:4px">Total</div>'+
+      '<div style="font-size:16px;font-weight:800;color:#F07800">'+money(atualData.valor)+'</div>'+
+      '<div style="font-size:11px;color:#666;margin-top:2px">'+(atualData.aparelhos+atualData.servicos+atualData.balcao)+' vendas</div>'+
+    '</div>'+
+  '</div>'+
+'</div>';
 
   var remunHtml = v.isSocio ? '' :
     '<div class="remun-card">'+
