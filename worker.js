@@ -1384,6 +1384,51 @@ export default {
     situacoes: situacoes,
     amostraClientes: amostraClientes
   }, null, 2), {headers:cors});
+}if (debugParam === '7') {
+  // Caça vendas com cliente "Consumidor" nas 3 lojas configuradas
+  const [yy,mm] = mes.split('-');
+  const ultimoD = new Date(parseInt(yy), parseInt(mm), 0).getDate();
+  const inicioD = mes+'-01';
+  const fimD    = mes+'-'+ultimoD;
+  const resultadoPorLoja = {};
+  for (const loja of LOJAS) {
+    let page=1, all=[], hasMore=true, guard=0;
+    while (hasMore && guard++ < 60) {
+      const u = GC_BASE+'/vendas?data_inicio='+inicioD+'&data_fim='+fimD+'&loja_id='+loja.id+'&limite=100&pagina='+page;
+      const res = await fetch(u, {headers:{
+        'access-token': env.GC_ACCESS_TOKEN,
+        'secret-access-token': env.GC_SECRET_TOKEN,
+        'Content-Type':'application/json'
+      }});
+      const j = await res.json();
+      const items = j.data || [];
+      all = all.concat(items);
+      const total = parseInt((j.meta||{}).total_registros || 0);
+      hasMore = items.length === 100 && all.length < total;
+      page++;
+    }
+    // Filtra: cliente "Consumidor" OU sem vendedor
+    const suspeitas = all.filter(function(v){
+      const cli = (v.nome_cliente||v.cliente||'').toLowerCase();
+      const semVend = !v.vendedor_id || v.vendedor_id === '' || !v.nome_vendedor;
+      return cli.includes('consumidor') || semVend;
+    });
+    resultadoPorLoja[loja.id] = {
+      totalVendasNaLoja: all.length,
+      qtdSuspeitas: suspeitas.length,
+      amostra: suspeitas.slice(0, 15).map(function(v){
+        return {
+          cliente: v.nome_cliente || v.cliente,
+          vendedor_id: v.vendedor_id,
+          nome_vendedor: v.nome_vendedor,
+          situacao: v.nome_situacao,
+          valor: v.valor_total,
+          data: v.data
+        };
+      })
+    };
+  }
+  return new Response(JSON.stringify(resultadoPorLoja, null, 2), {headers:cors});
 }
 
       try {
