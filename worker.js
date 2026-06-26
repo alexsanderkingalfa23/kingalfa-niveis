@@ -579,10 +579,23 @@ function normNome(n) {
 }
 // Mesma normalização do worker (tira acento, "(VENDEDOR 2)", caixa)
 function normNomeFront(n) {
-  return (n||'')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(new RegExp('\\([^)]*\\)','g'),'')
-    .replace(new RegExp('\\s+','g'),' ').trim().toUpperCase();
+  var s = (n || '').normalize('NFD');
+  var r = '';
+  for (var i = 0; i < s.length; i++) {
+    var code = s.charCodeAt(i);
+    if (code >= 0x0300 && code <= 0x036f) continue; // pula acentos
+    r += s[i];
+  }
+  var out = '';
+  var skip = 0;
+  for (var i = 0; i < r.length; i++) {
+    var ch = r[i];
+    if (ch === '(') { skip++; continue; }
+    if (ch === ')') { if (skip > 0) skip--; continue; }
+    if (skip > 0) continue;
+    out += ch;
+  }
+  return out.replace(/  +/g, ' ').replace(/^ +| +$/g, '').toUpperCase();
 }
 function getSellerVendas(data, vendedor) {
   var result = {aparelhos:0, servicos:0, valor:0};
