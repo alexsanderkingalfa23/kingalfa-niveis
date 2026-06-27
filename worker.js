@@ -412,6 +412,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <button class="tab on" id="tab-geral" onclick="showTab('geral')"><i class="ti ti-trophy"></i><span> Ranking</span></button>
     <button class="tab" id="tab-ind" onclick="showTab('ind')"><i class="ti ti-user-circle"></i><span> Meu Dashboard</span></button>
     <button class="tab" id="tab-admin" onclick="showTab('admin')" style="display:none"><i class="ti ti-settings"></i><span> Admin</span></button>
+    <button class="tab" id="tab-acomp" onclick="showTab('acomp')" style="display:none"><i class="ti ti-history"></i><span> Acompanhamento</span></button>
   </div>
   <div id="view-geral" class="view on">
     <div class="vg-wrap">
@@ -430,6 +431,9 @@ tr.me .vname-pill{border-color:var(--ka)}
   </div>
   <div id="view-admin" class="view">
     <div class="admin-wrap" id="admin-content"></div>
+  </div>
+  <div id="view-acomp" class="view">
+    <div class="admin-wrap" id="acomp-content"></div>
   </div>
 </div>
 
@@ -454,7 +458,8 @@ var DEFAULT_DATA = {
     {id:2, nome:'King 02 — Pq. Anhanguera', nomeGC:'KING 02 - Pq. Anhanguera', lojaId:'', metaFaturamento:null},
     {id:3, nome:'King 03 — Igualdade',      nomeGC:'KING 03 - Igualdade',      lojaId:'', metaFaturamento:null}
   ],
-  vendedores: []
+  vendedores: [],
+  historico: {}
 };
 
 var appData = null;
@@ -462,6 +467,7 @@ var currentUser = null;
 var vendaCache = {};
 var pinBuffer = '';
 var selectedSellerId = null;
+var acompSelectedId = null;
 
 // ========== EMBLEMAS DOS NÍVEIS (SVG inline) ==========
 // Cada função retorna SVG do emblema no tamanho passado.
@@ -567,6 +573,7 @@ async function loadData() {
     const j = await r.json();
     var rec = j.record||j;
     appData = (rec&&rec.vendedores) ? rec : DEFAULT_DATA;
+    if (!appData.historico) appData.historico = {};
     var migrou = false;
     (appData.unidades||[]).forEach(function(u){
       if (u.metaFaturamento == null && u.metaServicos != null) { u.metaFaturamento = u.metaServicos; migrou = true; }
@@ -795,8 +802,8 @@ async function advanceChangePin() {
 function loginSuccess(user) {
   currentUser = user;
   g('topbar-user').textContent = user.nome;
-  if (user.isAdmin) { g('tab-admin').style.display = 'flex'; g('tab-ind').style.display = 'none'; }
-  else { g('tab-admin').style.display = 'none'; g('tab-ind').style.display = 'flex'; }
+  if (user.isAdmin) { g('tab-admin').style.display = 'flex'; g('tab-acomp').style.display = 'flex'; g('tab-ind').style.display = 'none'; }
+  else { g('tab-admin').style.display = 'none'; g('tab-acomp').style.display = 'none'; g('tab-ind').style.display = 'flex'; }
   showScreen('app');
   showTab('geral');
 }
@@ -813,13 +820,14 @@ function showScreen(s) {
   g('screen-'+s).style.flexDirection = 'column';
 }
 function showTab(t) {
-  ['geral','ind','admin'].forEach(function(id){
+  ['geral','ind','admin','acomp'].forEach(function(id){
     g('view-'+id).classList.toggle('on', id===t);
     var tab=g('tab-'+id); if(tab) tab.classList.toggle('on',id===t);
   });
   if (t==='geral') renderGeral();
   if (t==='ind')   renderInd();
   if (t==='admin') renderAdmin();
+  if (t==='acomp') renderAcompanhamento();
 }
 
 async function renderGeral() {
@@ -943,7 +951,7 @@ async function renderInd() {
   var pct  = nx ? Math.min(100,Math.round(atualData.aparelhos/nx.minAp*100)) : 100;
   var gap  = nx ? Math.max(0,nx.minAp-atualData.aparelhos) : 0;
   var pctVal = (lvl.pct*100).toFixed(2).replace('.',',')+'%';
-  var commAp = v.isSocio ? 0 : Math.round(lvl.pct * 1646.18 * atualData.aparelhos);
+  var commAp = v.isSocio ? 0 : Math.round(lvl.pct * atualData.valorAparelhos);
   var total  = v.isSocio ? 0 : v.salario + v.beneficios + commAp;
 
   var infos = [];
@@ -1011,6 +1019,14 @@ async function renderInd() {
     '<div class="remun-row"><span class="remun-total-label">Total estimado</span><span class="remun-total-val">'+money(total)+'</span></div>'+
     '</div>';
 
+  var histInd = histTableHTML(v.id, { excludeCurrent:true, showComissao: !v.isSocio });
+  var histHtml = '<div class="fat-sec">'+
+    '<div class="fat-title"><i class="ti ti-history" style="color:var(--ka)"></i> Seu histórico mensal</div>'+
+    (histInd
+      ? histInd
+      : '<p style="font-size:12px;color:var(--text2);line-height:1.6;margin:0">Ainda não há meses fechados arquivados. Conforme os meses forem fechando, seu histórico aparece aqui automaticamente.</p>')+
+  '</div>';
+
   g('ind-content').innerHTML =
     '<div class="ind-hero">'+
     '<div class="ind-emb">'+emblemaPorNivel(nivelCalc.nivel, 80)+'</div>'+
@@ -1034,10 +1050,153 @@ async function renderInd() {
 
     fatHtml +
     remunHtml +
+    histHtml +
 
     '<div class="ibox">'+
     '<div class="ibox-t"><i class="ti ti-info-circle"></i> O que você precisa saber</div>'+
     infos.map(function(n){return'<div class="irow"><i class="ti '+n.i+'" style="color:'+n.c+'"></i><span>'+n.t+'</span></div>';}).join('')+
+    '</div>';
+}
+
+// ========== ACOMPANHAMENTO / HISTÓRICO ==========
+function nivelPorAparelhos(ap) {
+  var niveis = appData.config.niveis;
+  for (var j=niveis.length-1;j>=0;j--){ if(ap>=niveis[j].minAp) return j; }
+  return 0;
+}
+
+function mesAnteriorStr(mes) {
+  var p = mes.split('-'); var y=parseInt(p[0]), m=parseInt(p[1]);
+  return m===1 ? (y-1)+'-12' : y+'-'+String(m-1).padStart(2,'0');
+}
+
+function snapshotVendedor(atual, isSocio) {
+  var idx = nivelPorAparelhos(atual.aparelhos);
+  var pct = (appData.config.niveis[idx]||{pct:0}).pct;
+  var vAp = Math.round(atual.valorAparelhos);
+  return {
+    aparelhos: atual.aparelhos, servicos: atual.servicos, balcao: atual.balcao,
+    valorAparelhos: vAp,
+    valorServicos:  Math.round(atual.valorServicos),
+    valorBalcao:    Math.round(atual.valorBalcao),
+    valorTotal:     Math.round(atual.valor),
+    nivelIdx: idx,
+    comissao: isSocio ? 0 : Math.round(pct * vAp),
+    arquivadoEm: new Date().toISOString()
+  };
+}
+
+// Tabela de histórico reutilizável (admin e dashboard do vendedor)
+function histTableHTML(vendedorId, opts) {
+  opts = opts || {};
+  var hist = appData.historico||{};
+  var hv = hist[vendedorId]||{};
+  var meses = Object.keys(hv).sort().reverse();
+  if (opts.excludeCurrent) { var cm = curMes(); meses = meses.filter(function(m){ return m!==cm; }); }
+  if (!meses.length) return null;
+  var showC = !!opts.showComissao;
+  var niveis = appData.config.niveis;
+  var tAp=0,tVa=0,tVs=0,tVb=0,tVt=0,tC=0;
+  var trs = meses.map(function(m){
+    var s = hv[m];
+    var com = (s.comissao!=null) ? s.comissao : Math.round(((niveis[s.nivelIdx]||{pct:0}).pct) * (s.valorAparelhos||0));
+    tAp+=s.aparelhos; tVa+=s.valorAparelhos; tVs+=s.valorServicos; tVb+=s.valorBalcao; tVt+=s.valorTotal; tC+=com;
+    var nivelNome = (niveis[s.nivelIdx]||{nome:'-'}).nome;
+    return '<tr>'+
+      '<td style="font-weight:700;white-space:nowrap">'+fmtMes(m)+'</td>'+
+      '<td><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:22px;height:22px;display:inline-block">'+emblemaPorNivel(s.nivelIdx,22)+'</span>'+nivelNome+'</span></td>'+
+      '<td style="text-align:center;font-weight:700">'+s.aparelhos+'</td>'+
+      '<td style="white-space:nowrap">'+money(s.valorAparelhos)+'</td>'+
+      '<td style="white-space:nowrap">'+money(s.valorServicos)+' <span style="color:var(--text3);font-size:11px">('+s.servicos+')</span></td>'+
+      '<td style="white-space:nowrap">'+money(s.valorBalcao)+' <span style="color:var(--text3);font-size:11px">('+s.balcao+')</span></td>'+
+      '<td style="font-weight:800;color:var(--ka);white-space:nowrap">'+money(s.valorTotal)+'</td>'+
+      (showC ? '<td style="font-weight:700;color:var(--green);white-space:nowrap">'+money(com)+'</td>' : '')+
+    '</tr>';
+  }).join('');
+  var foot = '<tr style="border-top:2px solid var(--border2)">'+
+    '<td style="font-weight:800">Total ('+meses.length+'m)</td>'+
+    '<td></td>'+
+    '<td style="text-align:center;font-weight:800">'+tAp+'</td>'+
+    '<td style="font-weight:700">'+money(tVa)+'</td>'+
+    '<td style="font-weight:700">'+money(tVs)+'</td>'+
+    '<td style="font-weight:700">'+money(tVb)+'</td>'+
+    '<td style="font-weight:800;color:var(--ka)">'+money(tVt)+'</td>'+
+    (showC ? '<td style="font-weight:800;color:var(--green)">'+money(tC)+'</td>' : '')+
+  '</tr>';
+  return '<div class="atw" style="overflow-x:auto"><table class="at"><thead><tr>'+
+    '<th>Mês</th><th>Nível</th><th>Aparelhos</th><th>R$ Aparelhos</th><th>Serviços</th><th>Balcão</th><th>Total</th>'+
+    (showC ? '<th>Comissão</th>' : '')+
+    '</tr></thead><tbody>'+trs+foot+'</tbody></table></div>';
+}
+
+async function arquivarMes(mes, preData) {
+  var data;
+  if (preData) { data = preData; }
+  else { delete vendaCache[mes]; data = await fetchVendas(mes); }
+  if (!data || !data.mesAtual) throw new Error('Sem dados para '+mes);
+  if (!appData.historico) appData.historico = {};
+  (appData.vendedores||[]).forEach(function(v){
+    var atual = getSellerVendas(data.mesAtual, v);
+    if (!appData.historico[v.id]) appData.historico[v.id] = {};
+    appData.historico[v.id][mes] = snapshotVendedor(atual, v.isSocio);
+  });
+  await saveData();
+}
+
+function onAcompSel(val) { acompSelectedId = parseInt(val); renderAcompanhamento(); }
+
+async function backfillMes() {
+  var mes = g('acomp-mes').value;
+  var msg = g('acomp-msg');
+  if (!mes) { if(msg){msg.className='sync-msg err';msg.style.display='flex';msg.innerHTML='<i class="ti ti-alert-circle"></i> Escolha um mês.';} return; }
+  if (msg) { msg.className='sync-msg loading'; msg.style.display='flex'; msg.innerHTML='<i class="ti ti-loader-2 spin"></i> Buscando '+fmtMes(mes)+' no Gestão Click e arquivando...'; }
+  try {
+    await arquivarMes(mes);
+    renderAcompanhamento();
+    var m2 = g('acomp-msg');
+    if (m2) { m2.className='sync-msg ok'; m2.style.display='flex'; m2.innerHTML='<i class="ti ti-check"></i> '+fmtMes(mes)+' arquivado!'; }
+  } catch(e) {
+    var m3 = g('acomp-msg');
+    if (m3) { m3.className='sync-msg err'; m3.style.display='flex'; m3.innerHTML='<i class="ti ti-alert-circle"></i> Erro: '+e.message; }
+  }
+}
+
+function renderAcompanhamento() {
+  var vendedores = appData.vendedores||[];
+  var hist = appData.historico||{};
+  if ((acompSelectedId==null || !getVendedor(acompSelectedId)) && vendedores.length) acompSelectedId = vendedores[0].id;
+  var v = getVendedor(acompSelectedId);
+  var defMes = mesAnteriorStr(curMes());
+
+  var selOpts = vendedores.map(function(x){
+    return '<option value="'+x.id+'"'+(x.id===acompSelectedId?' selected':'')+'>'+x.nome+'</option>';
+  }).join('');
+
+  var tabela;
+  if (!v) {
+    tabela = '<p style="font-size:13px;color:var(--text2)">Nenhum vendedor cadastrado.</p>';
+  } else {
+    var t = histTableHTML(v.id, { showComissao: !v.isSocio });
+    tabela = t || '<p style="font-size:13px;color:var(--text2);line-height:1.6">Nenhum mês arquivado ainda para <strong>'+v.nome+'</strong>.<br>Clique em <strong>Sincronizar</strong> (aba Admin) para arquivar o mês atual, ou use o controle acima para buscar um mês passado.</p>';
+  }
+
+  g('acomp-content').innerHTML =
+    '<div class="admin-section">'+
+    '<div class="admin-sec-title"><i class="ti ti-user-search"></i> Acompanhamento por Vendedor</div>'+
+    '<label class="fl">Selecione o vendedor</label>'+
+    '<select id="acomp-sel" onchange="onAcompSel(this.value)" style="padding:10px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);width:100%;max-width:320px;outline:none">'+selOpts+'</select>'+
+    '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">'+
+    '<label class="fl">Arquivar um mês passado (puxa do Gestão Click e congela)</label>'+
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+    '<input type="month" id="acomp-mes" value="'+defMes+'" style="padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
+    '<button class="btn btn-p" onclick="backfillMes()"><i class="ti ti-archive"></i> Buscar e arquivar</button>'+
+    '</div>'+
+    '<div id="acomp-msg" class="sync-msg" style="margin-top:12px"></div>'+
+    '</div>'+
+    '</div>'+
+    '<div class="admin-section">'+
+    '<div class="admin-sec-title"><i class="ti ti-history"></i> Histórico'+(v?' — '+v.nome:'')+'</div>'+
+    tabela+
     '</div>';
 }
 
@@ -1235,6 +1394,9 @@ async function syncGestaoClick() {
       var nx  = niveis[v.nivelAtual+1];
       v.mesesAcima  = (nx && atualData.aparelhos >= nx.minAp) ? (v.mesesAcima||0)+1 : 0;
       v.mesesAbaixo = (atualData.aparelhos < lvl.minAp) ? (v.mesesAbaixo||0)+1 : 0;
+      if (!appData.historico) appData.historico = {};
+      if (!appData.historico[v.id]) appData.historico[v.id] = {};
+      appData.historico[v.id][mes] = snapshotVendedor(atualData, v.isSocio);
     });
     await saveData();
     msg.className='sync-msg ok';
