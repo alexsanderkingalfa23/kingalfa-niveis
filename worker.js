@@ -1061,11 +1061,13 @@ function renderAdmin() {
   }).join('');
 
   var vendRows = vendedores.map(function(v) {
+    var gcVal = (v.nomesGC||[]).filter(function(n){return n && n.trim();}).join(', ');
     return '<tr>'+
       '<td><input type="text" class="adm-nome" data-id="'+v.id+'" value="'+v.nome+'" style="min-width:130px"></td>'+
       '<td><select class="adm-unit" data-id="'+v.id+'">'+
         unidades.map(function(u2){return'<option value="'+u2.id+'"'+(u2.id===v.unidadeId?' selected':'')+'>'+u2.nome+'</option>';}).join('')+
       '</select></td>'+
+      '<td><input type="text" class="adm-gcnomes" data-id="'+v.id+'" value="'+gcVal+'" placeholder="Ex: CYBELLE" title="Nome(s) exato(s) como aparece no Gestão Click. Vários separados por vírgula." style="min-width:180px"></td>'+
       '<td>'+(v.isSocio?'<span class="socio-badge">Sócio</span>':'<input type="number" class="adm-sal" data-id="'+v.id+'" value="'+v.salario+'" min="0" style="width:90px">')+'</td>'+
       '<td>'+(v.isSocio?'—':'<input type="number" class="adm-ben" data-id="'+v.id+'" value="'+v.beneficios+'" min="0" style="width:80px">')+'</td>'+
       '<td><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--text3);font-size:12px">R$</span><input type="number" class="adm-meta" data-id="'+v.id+'" value="'+(v.metaFaturamento||'')+'" placeholder="—" min="0" step="100" style="width:100px"></div></td>'+
@@ -1097,8 +1099,9 @@ function renderAdmin() {
 
     '<div class="admin-section">'+
     '<div class="admin-sec-title"><i class="ti ti-users"></i> Vendedores</div>'+
+    '<p style="font-size:12px;color:var(--text2);margin-bottom:14px">O campo <strong>Nome no GC</strong> deve ter o nome <em>exato</em> do vendedor como aparece nas vendas do Gestão Click. Se o vendedor usa mais de um nome (ex: sócio que vende em 2 lojas), separe por vírgula.</p>'+
     '<div class="atw" style="overflow-x:auto"><table class="at"><thead><tr>'+
-    '<th>Nome</th><th>Unidade</th><th>Salário</th><th>Benefícios</th><th>Meta R$</th><th>PIN</th><th></th>'+
+    '<th>Nome</th><th>Unidade</th><th>Nome no GC</th><th>Salário</th><th>Benefícios</th><th>Meta R$</th><th>PIN</th><th></th>'+
     '</tr></thead><tbody id="vend-tbody">'+vendRows+'</tbody></table></div>'+
     '<div class="btn-row">'+
     '<button class="btn btn-g" onclick="addVendedor()"><i class="ti ti-user-plus"></i> Adicionar</button>'+
@@ -1178,6 +1181,13 @@ async function saveVendedores() {
     var id = parseInt(el.dataset.id), v = getVendedor(id);
     if (v) v.unidadeId = parseInt(el.value);
   });
+  document.querySelectorAll('[class*=adm-gcnomes]').forEach(function(el) {
+    var id = parseInt(el.dataset.id), v = getVendedor(id);
+    if (v) {
+      var lista = el.value.split(',').map(function(s){return s.trim();}).filter(function(s){return s;});
+      v.nomesGC = lista.length ? lista : [''];
+    }
+  });
   document.querySelectorAll('[class*=adm-sal]').forEach(function(el) {
     var id = parseInt(el.dataset.id), v = getVendedor(id);
     if (v) v.salario = parseInt(el.value)||0;
@@ -1191,6 +1201,7 @@ async function saveVendedores() {
     if (v) v.metaFaturamento = el.value ? parseFloat(el.value) : null;
   });
   await saveData();
+  vendaCache = {};
   alert('Vendedores salvos!');
   renderAdmin();
 }
