@@ -972,6 +972,7 @@ async function renderInd() {
   var metaFat = metaInd ? v.metaFaturamento : (u && u.metaFaturamento != null ? u.metaFaturamento : null);
   var pctMeta = metaFat ? Math.min(100, Math.round(atualData.valor / metaFat * 100)) : 0;
   var faltaMeta = metaFat ? Math.max(0, metaFat - atualData.valor) : 0;
+  var metaBatida = !metaFat || (atualData.valor >= metaFat);
   var metaBarra = metaFat
     ? '<div class="meta-bar">'+
         '<div class="meta-bar-hd">'+
@@ -1018,7 +1019,7 @@ async function renderInd() {
     '<div class="remun-row"><span class="remun-label">Salário fixo</span><span class="remun-val">'+money(v.salario)+'</span></div>'+
     '<div class="remun-row"><span class="remun-label">Benefícios</span><span class="remun-val">'+money(v.beneficios)+'</span></div>'+
     '<div class="remun-row"><span class="remun-label">Comissão financeiras ('+pctVal+')</span><span class="remun-val">'+money(commAp)+'</span></div>'+
-    '<div class="remun-row"><span class="remun-label">Comissão Balcão (4%)</span><span class="remun-val">'+money(commBalc)+'</span></div>'+
+    '<div class="remun-row"'+(metaBatida?'':' style="opacity:.45"')+'><span class="remun-label">Comissão Balcão (4%)'+(metaBatida?'':' <span style="font-size:11px;color:var(--text3)"><i class="ti ti-lock" style="font-size:11px"></i> libera ao bater a meta</span>')+'</span><span class="remun-val">'+money(commBalc)+'</span></div>'+
     '<div class="remun-row"><span class="remun-total-label">Total estimado</span><span class="remun-total-val">'+money(total)+'</span></div>'+
     '</div>';
 
