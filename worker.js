@@ -952,7 +952,8 @@ async function renderInd() {
   var gap  = nx ? Math.max(0,nx.minAp-atualData.aparelhos) : 0;
   var pctVal = (lvl.pct*100).toFixed(2).replace('.',',')+'%';
   var commAp = v.isSocio ? 0 : Math.round(lvl.pct * atualData.valorAparelhos);
-  var total  = v.isSocio ? 0 : v.salario + v.beneficios + commAp;
+  var commBalc = v.isSocio ? 0 : Math.round(0.04 * atualData.valorBalcao);
+  var total  = v.isSocio ? 0 : v.salario + v.beneficios + commAp + commBalc;
 
   var infos = [];
   if (nx) {
@@ -967,13 +968,14 @@ async function renderInd() {
     infos.push({i:'ti-shield-check',c:'var(--green)',t:'Nível seguro — mês anterior dentro da meta.'});
   }
 
-  var metaFat = v.metaFaturamento != null ? v.metaFaturamento : (u && u.metaFaturamento != null ? u.metaFaturamento : null);
+  var metaInd = v.metaFaturamento != null;
+  var metaFat = metaInd ? v.metaFaturamento : (u && u.metaFaturamento != null ? u.metaFaturamento : null);
   var pctMeta = metaFat ? Math.min(100, Math.round(atualData.valor / metaFat * 100)) : 0;
   var faltaMeta = metaFat ? Math.max(0, metaFat - atualData.valor) : 0;
   var metaBarra = metaFat
     ? '<div class="meta-bar">'+
         '<div class="meta-bar-hd">'+
-          '<span class="meta-bar-label">Meta de faturamento</span>'+
+          '<span class="meta-bar-label">Meta de faturamento'+(metaInd?' (individual)':' (unidade)')+'</span>'+
           '<span class="meta-bar-val">'+money(atualData.valor)+' / '+money(metaFat)+'</span>'+
         '</div>'+
         '<div class="meta-bar-bg"><div class="meta-bar-fill" style="width:'+pctMeta+'%;background:'+(atualData.valor>=metaFat?'var(--green)':'var(--ka)')+'"></div></div>'+
@@ -1016,6 +1018,7 @@ async function renderInd() {
     '<div class="remun-row"><span class="remun-label">Salário fixo</span><span class="remun-val">'+money(v.salario)+'</span></div>'+
     '<div class="remun-row"><span class="remun-label">Benefícios</span><span class="remun-val">'+money(v.beneficios)+'</span></div>'+
     '<div class="remun-row"><span class="remun-label">Comissão financeiras ('+pctVal+')</span><span class="remun-val">'+money(commAp)+'</span></div>'+
+    '<div class="remun-row"><span class="remun-label">Comissão Balcão (4%)</span><span class="remun-val">'+money(commBalc)+'</span></div>'+
     '<div class="remun-row"><span class="remun-total-label">Total estimado</span><span class="remun-total-val">'+money(total)+'</span></div>'+
     '</div>';
 
@@ -1074,14 +1077,16 @@ function snapshotVendedor(atual, isSocio) {
   var idx = nivelPorAparelhos(atual.aparelhos);
   var pct = (appData.config.niveis[idx]||{pct:0}).pct;
   var vAp = Math.round(atual.valorAparelhos);
+  var vBalc = Math.round(atual.valorBalcao);
   return {
     aparelhos: atual.aparelhos, servicos: atual.servicos, balcao: atual.balcao,
     valorAparelhos: vAp,
     valorServicos:  Math.round(atual.valorServicos),
-    valorBalcao:    Math.round(atual.valorBalcao),
+    valorBalcao:    vBalc,
     valorTotal:     Math.round(atual.valor),
     nivelIdx: idx,
     comissao: isSocio ? 0 : Math.round(pct * vAp),
+    comissaoBalcao: isSocio ? 0 : Math.round(0.04 * vBalc),
     arquivadoEm: new Date().toISOString()
   };
 }
@@ -1099,7 +1104,9 @@ function histTableHTML(vendedorId, opts) {
   var tAp=0,tVa=0,tVs=0,tVb=0,tVt=0,tC=0;
   var trs = meses.map(function(m){
     var s = hv[m];
-    var com = (s.comissao!=null) ? s.comissao : Math.round(((niveis[s.nivelIdx]||{pct:0}).pct) * (s.valorAparelhos||0));
+    var comDev = (s.comissao!=null) ? s.comissao : Math.round(((niveis[s.nivelIdx]||{pct:0}).pct) * (s.valorAparelhos||0));
+    var comBal = (s.comissaoBalcao!=null) ? s.comissaoBalcao : 0;
+    var com = comDev + comBal;
     tAp+=s.aparelhos; tVa+=s.valorAparelhos; tVs+=s.valorServicos; tVb+=s.valorBalcao; tVt+=s.valorTotal; tC+=com;
     var nivelNome = (niveis[s.nivelIdx]||{nome:'-'}).nome;
     return '<tr>'+
