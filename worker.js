@@ -1457,14 +1457,28 @@ export default {
           fetchVendasMes(mes, LOJAS[2].id, env),
         ]);
         const todas = [...d1, ...d2, ...d3];
-        const situacoes = {};
-        todas.forEach(function(v){
-          const s = (v.nome_situacao||'(vazio)');
-          if (!situacoes[s]) situacoes[s] = { qtd:0, valor:0, contaNoApp: !!classify(s, v.__tipoGC) };
-          situacoes[s].qtd++;
-          situacoes[s].valor += parseFloat(v.valor_total||0);
-        });
-        Object.keys(situacoes).forEach(function(k){ situacoes[k].valor = Math.round(situacoes[k].valor); });
+        function calcSituacoes(lista){
+          const out = {};
+          lista.forEach(function(v){
+            const s = (v.nome_situacao||'(vazio)');
+            if (!out[s]) out[s] = { qtd:0, valor:0, contaNoApp: !!classify(s, v.__tipoGC) };
+            out[s].qtd++;
+            out[s].valor += parseFloat(v.valor_total||0);
+          });
+          Object.keys(out).forEach(function(k){ out[k].valor = Math.round(out[k].valor); });
+          return out;
+        }
+        function totalConta(lista){
+          return Math.round(lista.reduce(function(sum,v){
+            return sum + (classify(v.nome_situacao||'', v.__tipoGC) ? parseFloat(v.valor_total||0) : 0);
+          },0));
+        }
+        const situacoes = calcSituacoes(todas);
+        const porLoja = {
+          'Matriz (271212)':      { faturamentoApp: totalConta(d1), situacoes: calcSituacoes(d1) },
+          'Anhanguera (319869)':  { faturamentoApp: totalConta(d2), situacoes: calcSituacoes(d2) },
+          'Igualdade (556719)':   { faturamentoApp: totalConta(d3), situacoes: calcSituacoes(d3) }
+        };
         const roster = {};
         todas.forEach(function(v){
           const id = v.vendedor_id || '(sem_id)';
@@ -1492,6 +1506,7 @@ export default {
             const s = (v.nome_situacao||'').trim().toUpperCase();
             if (s.startsWith('CONCRETIZADA')) totalConcretizada += val;
           });
+          var camposGC = [...new Set(matches.flatMap(function(v){ return Object.keys(v); }))].sort();
           vendedor = {
             filtro: filtro,
             qtdVendas: matches.length,
@@ -1499,19 +1514,19 @@ export default {
             valorSoConcretizada_oQueOAppConta: Math.round(totalConcretizada),
             diferenca: Math.round(totalTudo - totalConcretizada),
             nomesEncontrados: [...new Set(matches.map(function(v){ return v.nome_vendedor; }))],
-            vendas: matches.map(function(v){ return {
-              tipoGC: v.__tipoGC,
-              situacao: v.nome_situacao,
-              valor: v.valor_total,
-              nome_vendedor: v.nome_vendedor,
-              vendedor_id: v.vendedor_id
-            };})
+            camposGC: camposGC,
+            vendas: matches.map(function(v){
+              var o = { tipoGC: v.__tipoGC };
+              Object.keys(v).forEach(function(k){ if (k!=='__tipoGC') o[k] = v[k]; });
+              return o;
+            })
           };
         }
         return new Response(JSON.stringify({
           tokensConfigurados: { access: !!env.GC_ACCESS_TOKEN, secret: !!env.GC_SECRET_TOKEN },
           totalVendas: todas.length,
           situacoes: situacoes,
+          porLoja: porLoja,
           roster: roster,
           vendedor: vendedor
         }, null, 2), {headers:cors});
