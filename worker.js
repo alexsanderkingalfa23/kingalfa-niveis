@@ -359,7 +359,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <div class="login-logo">
       <div style="font-size:22px;font-weight:800;color:var(--text)">GRUPO <span style="color:var(--ka)">KING ALFA</span></div>
       <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:uppercase;letter-spacing:2px">Programa de Níveis</div>
-      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 13 · comissão gerente</div>
+      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 13 · leitura direta</div>
     </div>
     <div id="seller-step">
       <div class="login-title">Quem é você?</div>
@@ -998,7 +998,9 @@ async function renderGerente() {
   var team = (appData.vendedores||[]).filter(function(v){ return v.unidadeId===uId; });
 
   var totalUnidade = 0;
-  var totalComissao = 0;
+  var totalAparelhosUnidade = 0;
+  var totalMetaUnidade = 0;
+  var totalMetaDefinida = true;
   var cards = team.map(function(v){
     var d  = getSellerVendas(allData.mesAtual, v);
     var da = getSellerVendas(allData.mesAnterior, v);
@@ -1006,22 +1008,13 @@ async function renderGerente() {
     var lvl = niveis[nc.nivel]||niveis[0];
     var nx  = niveis[nc.nivel+1];
     totalUnidade += (d.valor||0);
+    totalAparelhosUnidade += (d.aparelhos||0);
     var pctNivel = nx ? Math.min(100, Math.round(d.aparelhos/nx.minAp*100)) : 100;
     var gapNivel = nx ? Math.max(0, nx.minAp - d.aparelhos) : 0;
     var metaFat = (v.metaFaturamento != null) ? v.metaFaturamento : (u && u.metaFaturamento != null ? u.metaFaturamento : null);
+    if (metaFat) { totalMetaUnidade += metaFat; } else { totalMetaDefinida = false; }
     var pctMeta = metaFat ? Math.min(100, Math.round(d.valor/metaFat*100)) : 0;
     var faltaMeta = metaFat ? Math.max(0, metaFat - d.valor) : 0;
-    var comAp = v.isSocio ? 0 : Math.round((lvl.pct||0) * (d.valorAparelhos||0));
-    var comBalc = v.isSocio ? 0 : Math.round(0.04 * (d.valorBalcao||0));
-    var comTotal = comAp + comBalc;
-    totalComissao += comTotal;
-    var pctLbl = ((lvl.pct||0)*100).toFixed(2).replace('.',',')+'%';
-    var comBox = v.isSocio
-      ? '<div style="margin-top:10px;background:var(--bg-card2);border:1px solid var(--border2);border-radius:10px;padding:10px 12px;font-size:12px;color:var(--text2)"><i class="ti ti-crown" style="color:var(--ka)"></i> Sócio — sem comissão</div>'
-      : '<div style="margin-top:10px;background:var(--bg-card2);border:1px solid var(--border2);border-radius:10px;padding:10px 12px">'+
-          '<div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:12px;color:var(--text2)">Comissão do mês</span><span style="font-size:18px;font-weight:800;color:var(--green)">'+money(comTotal)+'</span></div>'+
-          '<div style="font-size:11px;color:var(--text3);margin-top:4px">Aparelhos ('+pctLbl+'): '+money(comAp)+' · Balcão (4%): '+money(comBalc)+'</div>'+
-        '</div>';
     var metaBar = metaFat
       ? '<div class="meta-bar" style="margin-top:10px">'+
           '<div class="meta-bar-hd"><span class="meta-bar-label">Meta faturamento</span><span class="meta-bar-val">'+money(d.valor)+' / '+money(metaFat)+'</span></div>'+
@@ -1043,9 +1036,18 @@ async function renderGerente() {
         '<div class="meta-bar-hint">'+(nx?(gapNivel>0?'Faltam '+gapNivel+' aparelhos':'Na faixa de '+nx.nome+'!'):'Nível máximo')+'</div>'+
       '</div>'+
       metaBar+
-      comBox+
     '</div>';
   }).join('');
+
+  var pctMetaUnidade = totalMetaUnidade ? Math.min(100, Math.round(totalUnidade/totalMetaUnidade*100)) : 0;
+  var faltaMetaUnidade = totalMetaUnidade ? Math.max(0, totalMetaUnidade - totalUnidade) : 0;
+  var metaUnidadeHtml = (totalMetaUnidade > 0)
+    ? '<div class="meta-bar" style="margin-top:14px">'+
+        '<div class="meta-bar-hd"><span class="meta-bar-label">Meta da unidade'+(!totalMetaDefinida?' (parcial — falta meta de algum vendedor)':'')+'</span><span class="meta-bar-val">'+money(totalUnidade)+' / '+money(totalMetaUnidade)+'</span></div>'+
+        '<div class="meta-bar-bg"><div class="meta-bar-fill" style="width:'+pctMetaUnidade+'%;background:'+(totalUnidade>=totalMetaUnidade?'var(--green)':'var(--ka)')+'"></div></div>'+
+        '<div class="meta-bar-hint">'+(totalUnidade>=totalMetaUnidade ? '✅ Meta atingida ('+pctMetaUnidade+'%)' : '⚠️ Faltam '+money(faltaMetaUnidade)+' ('+pctMetaUnidade+'%)')+'</div>'+
+      '</div>'
+    : '<div class="meta-bar" style="margin-top:14px"><div class="meta-bar-hint" style="font-style:italic">Meta da unidade a definir pelo admin</div></div>';
 
   el.innerHTML =
     '<div class="ind-hero">'+
@@ -1053,10 +1055,10 @@ async function renderGerente() {
       '<div>'+
         '<div class="ind-name">'+(u?u.nome:'Minha unidade')+'</div>'+
         '<div class="ind-lvl">'+money(totalUnidade)+'</div>'+
-        '<div class="ind-sub">Faturamento total da unidade · '+fmtMes(mes)+' · '+team.length+' vendedor(es)</div>'+
-        '<div class="ind-sub" style="margin-top:2px">Comissão total da equipe: <strong style="color:var(--green)">'+money(totalComissao)+'</strong></div>'+
+        '<div class="ind-sub">Faturamento total da unidade · '+fmtMes(mes)+' · '+team.length+' vendedor(es) · '+totalAparelhosUnidade+' aparelho(s) vendido(s)</div>'+
       '</div>'+
     '</div>'+
+    metaUnidadeHtml+
     (cards || '<p style="font-size:13px;color:var(--text2)">Nenhum vendedor cadastrado nesta unidade.</p>');
 }
 
