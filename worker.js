@@ -353,6 +353,7 @@ tr.me .vname-pill{border-color:var(--ka)}
 </head>
 <body>
 
+<div id="db-warn" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#7a1f1f;color:#fff;font-size:13px;font-weight:600;padding:10px 14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4)">⚠️ Sem conexão com o banco (JSONBin). Os dados exibidos NÃO são reais e nada será salvo. Não adicione/edite nada até reconectar.</div>
 <div id="screen-login">
   <div class="login-card">
     <div class="login-logo">
@@ -497,6 +498,7 @@ var DEFAULT_DATA = {
 };
 
 var appData = null;
+var dadosOk = false; // true SÓ quando dados reais foram lidos do bin. Bloqueia gravação em modo fallback.
 var currentUser = null;
 var vendaCache = {};
 var pinBuffer = '';
@@ -539,12 +541,21 @@ function findUserById(id){return getVendedor(id)||getGerente(id);}
 var jbConfigured = () => JSONBIN_ID!=='COLE_O_BIN_ID_AQUI';
 
 async function loadData() {
+  dadosOk = false;
   if (!jbConfigured()) { appData = JSON.parse(JSON.stringify(DEFAULT_DATA)); return; }
   try {
     const r = await fetch(API_BASE+'/config');
     const j = await r.json();
     var rec = j.record||j;
-    appData = (rec&&rec.vendedores) ? rec : DEFAULT_DATA;
+    var registroValido = r.ok && rec && rec.config && rec.adminPin && Array.isArray(rec.vendedores);
+    if (!registroValido) {
+      // NÃO conseguimos ler dados reais: modo somente-leitura, sem gravar nada por cima.
+      appData = JSON.parse(JSON.stringify(DEFAULT_DATA));
+      dadosOk = false;
+      return;
+    }
+    appData = rec;
+    dadosOk = true;
     if (!appData.historico) appData.historico = {};
     var migrou = false;
     if (!appData.gerentes || !appData.gerentes.length) { appData.gerentes = JSON.parse(JSON.stringify(DEFAULT_DATA.gerentes)); migrou = true; }
@@ -557,11 +568,12 @@ async function loadData() {
       if (v.metaFaturamento == null && v.metaServicos != null) { v.metaFaturamento = v.metaServicos; migrou = true; }
     });
     if (migrou) { try { await saveData(); } catch(e){} }
-  } catch(e) { appData = JSON.parse(JSON.stringify(DEFAULT_DATA)); }
+  } catch(e) { appData = JSON.parse(JSON.stringify(DEFAULT_DATA)); dadosOk = false; }
 }
 
 async function saveData() {
   if (!jbConfigured()) return;
+  if (!dadosOk) { console.warn('saveData BLOQUEADO: dados reais não carregados (modo fallback). Nada foi gravado.'); return; }
   await fetch(API_BASE+'/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(appData)});
 }
 
@@ -1573,6 +1585,7 @@ document.addEventListener('keydown', function(e) {
 async function init() {
   showScreen('login');
   await loadData();
+  var w = g('db-warn'); if (w) w.style.display = dadosOk ? 'none' : 'block';
   renderLoginList();
 }
 init();
