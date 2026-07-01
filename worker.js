@@ -1,4 +1,5 @@
 const GC_BASE = 'https://api.gestaoclick.com';
+const JSONBIN_ID = '6a3bdd8bf5f4af5e292909de'; // ID do bin (nao e segredo); a chave vem de env.JSONBIN_KEY
 const LOJAS = [
   { id: '271212' },
   { id: '319869' },
@@ -352,11 +353,13 @@ tr.me .vname-pill{border-color:var(--ka)}
 </head>
 <body>
 
+<div id="db-warn" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#7a1f1f;color:#fff;font-size:13px;font-weight:600;padding:10px 14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.4)">⚠️ Sem conexão com o banco (JSONBin). Os dados exibidos NÃO são reais e nada será salvo. Não adicione/edite nada até reconectar.</div>
 <div id="screen-login">
   <div class="login-card">
     <div class="login-logo">
       <div style="font-size:22px;font-weight:800;color:var(--text)">GRUPO <span style="color:var(--ka)">KING ALFA</span></div>
       <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:uppercase;letter-spacing:2px">Programa de Níveis</div>
+      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 12 · leitura direta</div>
     </div>
     <div id="seller-step">
       <div class="login-title">Quem é você?</div>
@@ -430,6 +433,8 @@ tr.me .vname-pill{border-color:var(--ka)}
     <button class="tab" id="tab-ind" onclick="showTab('ind')"><i class="ti ti-user-circle"></i><span> Meu Dashboard</span></button>
     <button class="tab" id="tab-admin" onclick="showTab('admin')" style="display:none"><i class="ti ti-settings"></i><span> Admin</span></button>
     <button class="tab" id="tab-acomp" onclick="showTab('acomp')" style="display:none"><i class="ti ti-history"></i><span> Acompanhamento</span></button>
+    <button class="tab" id="tab-hist" onclick="showTab('hist')" style="display:none"><i class="ti ti-calendar-stats"></i><span> Histórico</span></button>
+    <button class="tab" id="tab-ger" onclick="showTab('ger')" style="display:none"><i class="ti ti-users-group"></i><span> Minha Equipe</span></button>
   </div>
   <div id="view-geral" class="view on">
     <div class="vg-wrap">
@@ -452,12 +457,22 @@ tr.me .vname-pill{border-color:var(--ka)}
   <div id="view-acomp" class="view">
     <div class="admin-wrap" id="acomp-content"></div>
   </div>
+  <div id="view-hist" class="view">
+    <div class="vg-wrap"><div id="hist-content"></div></div>
+  </div>
+  <div id="view-ger" class="view">
+    <div class="vi-wrap" id="ger-content">
+      <div style="text-align:center;padding:40px;color:var(--text3)">
+        <i class="ti ti-loader-2 spin" style="font-size:28px;display:block;margin-bottom:8px"></i>Carregando...
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
 var PROGRAMA_INICIO = '2026-07';
 var JSONBIN_ID  = '6a3bdd8bf5f4af5e292909de';
-var JSONBIN_KEY = '$2a$10$WzIxNTgN9XRQfPCpGeVPoODb0VwvPbZoZcVT6nRkodWl01uzLgvXW';
+var JSONBIN_KEY = '$2a$10$WzIxNTgN9XRQfPCpGeVPoODb0VwvPbZoZcVT6nRkodWl01uzLgvXW'; // TEMP: leitura direta p/ recuperar acesso; re-esconder via secret depois
 var API_BASE    = '/api';
 
 var DEFAULT_DATA = {
@@ -476,10 +491,16 @@ var DEFAULT_DATA = {
     {id:3, nome:'King 03 — Igualdade',      nomeGC:'KING 03 - Igualdade',      lojaId:'556719', metaFaturamento:null}
   ],
   vendedores: [],
-  historico: {}
+  historico: {},
+  gerentes: [
+    {id:-101, unidadeId:1, nome:'Gerente Matriz KING 01',          pin:'03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', pinInicial:true},
+    {id:-102, unidadeId:2, nome:'Gerente PQ. Anhanguera KING 02',  pin:'03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', pinInicial:true},
+    {id:-103, unidadeId:3, nome:'Gerente Av. Igualdade KING 03',   pin:'03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', pinInicial:true}
+  ]
 };
 
 var appData = null;
+var dadosOk = false; // true SÓ quando dados reais foram lidos do bin. Bloqueia gravação em modo fallback.
 var currentUser = null;
 var vendaCache = {};
 var pinBuffer = '';
@@ -516,18 +537,30 @@ function fmtMes(m){if(!m)return'';var p=m.split('-');var n=['Jan','Fev','Mar','A
 function curMes(){return new Date().toISOString().slice(0,7);}
 function getUnidade(id){return (appData.unidades||[]).find(function(u){return u.id===id;});}
 function getVendedor(id){return (appData.vendedores||[]).find(function(v){return v.id===id;});}
+function getGerente(id){return (appData.gerentes||[]).find(function(g){return g.id===id;});}
+function findUserById(id){return getVendedor(id)||getGerente(id);}
 
 var jbConfigured = () => JSONBIN_ID!=='COLE_O_BIN_ID_AQUI';
 
 async function loadData() {
+  dadosOk = false;
   if (!jbConfigured()) { appData = JSON.parse(JSON.stringify(DEFAULT_DATA)); return; }
   try {
     const r = await fetch('https://api.jsonbin.io/v3/b/'+JSONBIN_ID+'/latest',{headers:{'X-Master-Key':JSONBIN_KEY,'X-Bin-Meta':'false'}});
     const j = await r.json();
     var rec = j.record||j;
-    appData = (rec&&rec.vendedores) ? rec : DEFAULT_DATA;
+    var registroValido = r.ok && rec && rec.config && rec.adminPin && Array.isArray(rec.vendedores);
+    if (!registroValido) {
+      // NÃO conseguimos ler dados reais: modo somente-leitura, sem gravar nada por cima.
+      appData = JSON.parse(JSON.stringify(DEFAULT_DATA));
+      dadosOk = false;
+      return;
+    }
+    appData = rec;
+    dadosOk = true;
     if (!appData.historico) appData.historico = {};
     var migrou = false;
+    if (!appData.gerentes || !appData.gerentes.length) { appData.gerentes = JSON.parse(JSON.stringify(DEFAULT_DATA.gerentes)); migrou = true; }
     var LOJA_POR_UNIDADE = {1:'271212', 2:'319869', 3:'556719'};
     (appData.unidades||[]).forEach(function(u){
       if (u.metaFaturamento == null && u.metaServicos != null) { u.metaFaturamento = u.metaServicos; migrou = true; }
@@ -537,11 +570,12 @@ async function loadData() {
       if (v.metaFaturamento == null && v.metaServicos != null) { v.metaFaturamento = v.metaServicos; migrou = true; }
     });
     if (migrou) { try { await saveData(); } catch(e){} }
-  } catch(e) { appData = JSON.parse(JSON.stringify(DEFAULT_DATA)); }
+  } catch(e) { appData = JSON.parse(JSON.stringify(DEFAULT_DATA)); dadosOk = false; }
 }
 
 async function saveData() {
   if (!jbConfigured()) return;
+  if (!dadosOk) { console.warn('saveData BLOQUEADO: dados reais não carregados (modo fallback). Nada foi gravado.'); return; }
   await fetch('https://api.jsonbin.io/v3/b/'+JSONBIN_ID,{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':JSONBIN_KEY},body:JSON.stringify(appData)});
 }
 
@@ -642,8 +676,14 @@ function renderLoginList() {
       '<span class="seller-unit-tag">'+(u?u.nome:'')+'</span>'+
     '</button>';
   });
+  (appData.gerentes||[]).forEach(function(gr){
+    html += '<button class="seller-btn admin-btn-login" onclick="selectSeller('+gr.id+')" style="margin-top:6px">'+
+      '<span><i class="ti ti-user-cog" style="font-size:14px"></i> '+gr.nome+'</span>'+
+      '<i class="ti ti-chevron-right" style="font-size:14px"></i>'+
+    '</button>';
+  });
   html += '<button class="seller-btn admin-btn-login" onclick="selectSeller(-1)" style="margin-top:6px">'+
-    '<span><i class="ti ti-shield-lock" style="font-size:14px"></i> Admin / Gerente</span>'+
+    '<span><i class="ti ti-shield-lock" style="font-size:14px"></i> Admin</span>'+
     '<i class="ti ti-chevron-right" style="font-size:14px"></i>'+
   '</button>';
   list.innerHTML = html;
@@ -651,7 +691,7 @@ function renderLoginList() {
 
 function selectSeller(id) {
   selectedSellerId = id;
-  var nome = id === -1 ? 'Admin / Gerente' : (getVendedor(id)||{nome:''}).nome;
+  var nome = id === -1 ? 'Admin' : (getGerente(id) ? getGerente(id).nome : (getVendedor(id)||{nome:''}).nome);
   g('pin-seller-name').textContent = nome;
   g('seller-step').style.display = 'none';
   g('pin-step').style.display = 'block';
@@ -684,6 +724,15 @@ async function checkPin() {
   if (selectedSellerId === -1) {
     if (hash === appData.adminPin) loginSuccess({id:-1, nome:'Admin', isAdmin:true});
     else { g('pin-error').textContent = 'PIN incorreto'; pinBuffer = ''; updatePinDots(); }
+    return;
+  }
+  var ger = getGerente(selectedSellerId);
+  if (ger) {
+    if (hash === ger.pin) {
+      var gerUser = {id:ger.id, nome:ger.nome, isGerente:true, gerenteUnidadeId:ger.unidadeId};
+      if (ger.pinInicial) { currentUser = gerUser; resetChangePin(); showScreen('changepin'); }
+      else loginSuccess(gerUser);
+    } else { g('pin-error').textContent = 'PIN incorreto'; pinBuffer = ''; updatePinDots(); }
     return;
   }
   var v = getVendedor(selectedSellerId);
@@ -752,7 +801,7 @@ async function advanceChangePin() {
     }
     var pin = changePinBuffer;
     var hash = await sha256(pin);
-    var v = getVendedor(currentUser.id);
+    var v = findUserById(currentUser.id);
     v.pin = hash; v.pinInicial = false;
     try { await saveData(); } catch(e){}
     loginSuccess(currentUser);
@@ -762,10 +811,20 @@ async function advanceChangePin() {
 function loginSuccess(user) {
   currentUser = user;
   g('topbar-user').textContent = user.nome;
-  if (user.isAdmin) { g('tab-admin').style.display = 'flex'; g('tab-acomp').style.display = 'flex'; g('tab-ind').style.display = 'none'; }
-  else { g('tab-admin').style.display = 'none'; g('tab-acomp').style.display = 'none'; g('tab-ind').style.display = 'flex'; }
-  showScreen('app');
-  showTab('geral');
+  ['tab-admin','tab-acomp','tab-ind','tab-hist','tab-ger'].forEach(function(id){ var t=g(id); if(t) t.style.display='none'; });
+  if (user.isAdmin) {
+    g('tab-admin').style.display='flex'; g('tab-acomp').style.display='flex'; g('tab-hist').style.display='flex';
+    g('tab-geral').style.display='flex';
+    showScreen('app'); showTab('geral');
+  } else if (user.isGerente) {
+    g('tab-ger').style.display='flex';
+    g('tab-geral').style.display='none';
+    showScreen('app'); showTab('ger');
+  } else {
+    g('tab-ind').style.display='flex';
+    g('tab-geral').style.display='flex';
+    showScreen('app'); showTab('geral');
+  }
 }
 
 function logout() {
@@ -780,7 +839,7 @@ function showScreen(s) {
   g('screen-'+s).style.flexDirection = 'column';
 }
 function showTab(t) {
-  ['geral','ind','admin','acomp'].forEach(function(id){
+  ['geral','ind','admin','acomp','hist','ger'].forEach(function(id){
     g('view-'+id).classList.toggle('on', id===t);
     var tab=g('tab-'+id); if(tab) tab.classList.toggle('on',id===t);
   });
@@ -788,16 +847,19 @@ function showTab(t) {
   if (t==='ind')   renderInd();
   if (t==='admin') renderAdmin();
   if (t==='acomp') renderAcompanhamento();
+  if (t==='hist')  renderHistorico();
+  if (t==='ger')   renderGerente();
 }
 
-async function renderGeral() {
-  g('geral-loading').style.display='block';
-  g('geral-content').style.display='none';
-  var mes = curMes();
+// Constrói o HTML do ranking (hero + unidades + individual) para qualquer mês.
+// opts: { showFat: bool (mostra faturamento R$), meuId: id do vendedor logado ou null }
+function buildRankingHTML(mes, allData, opts) {
+  opts = opts || {};
+  var isAdminGeral = !!opts.showFat;
+  var meuId = (opts.meuId != null) ? opts.meuId : null;
   var niveis = appData.config.niveis;
   var unidades = appData.unidades;
-  var vendedores = appData.vendedores;
-  var allData = await fetchVendas(mes);
+  var vendedores = (appData.vendedores||[]).filter(function(v){ return !v.oculto; });
 
   var sellerStats = vendedores.map(function(v) {
     var u = getUnidade(v.unidadeId);
@@ -825,7 +887,6 @@ async function renderGeral() {
   var mediaAp = sellerStats.length ? Math.round(totalAp/sellerStats.length) : 0;
   var best = sellerStats[0];
 
-  var isAdminGeral = !!(currentUser && currentUser.isAdmin);
   var uc = unitStats.map(function(us,i) {
     var label = i===0 ? 'Líder' : (i+1)+'ª';
     var fatLine = isAdminGeral
@@ -838,8 +899,6 @@ async function renderGeral() {
       '<div class="ucard-meta" style="font-size:13px;opacity:0.85">'+us.totalAp+' ap. · '+us.count+' vend.</div>'+
     '</div>';
   }).join('');
-
-  var meuId = currentUser && !currentUser.isAdmin ? currentUser.id : null;
 
   var rows = sellerStats.map(function(s,i) {
     var nx = niveis[s.nivelId+1];
@@ -879,9 +938,8 @@ async function renderGeral() {
       '</div></div></div>';
   }).join('');
 
-  g('geral-content').innerHTML =
-    '<div class="hero-stats">'+
-    '<div class="hstat"><div class="hsl">Total aparelhos</div><div class="hsv">'+totalAp+'</div><div class="hss">mês atual</div></div>'+
+  return '<div class="hero-stats">'+
+    '<div class="hstat"><div class="hsl">Total aparelhos</div><div class="hsv">'+totalAp+'</div><div class="hss">'+fmtMes(mes)+'</div></div>'+
     '<div class="hstat"><div class="hsl">Média/vendedor</div><div class="hsv">'+mediaAp+'</div><div class="hss">aparelhos</div></div>'+
     '<div class="hstat"><div class="hsl">Melhor vendedor</div><div class="hsv" style="font-size:18px;line-height:1.3">'+(best?best.v.nome:'-')+'</div><div class="hss">'+(best?'R$ '+Math.round(best.valor||0).toLocaleString('pt-BR'):'')+'</div></div>'+
     '<div class="hstat"><div class="hsl">Mês</div><div class="hsv" style="font-size:18px">'+fmtMes(mes)+'</div></div>'+
@@ -894,10 +952,100 @@ async function renderGeral() {
     '<th>#</th><th>Vendedor</th><th>Unidade</th><th>Nível</th><th>Valor</th><th>Ap.</th><th>Próximo</th>'+
     '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
     '<div class="rank-cards">'+rcards+'</div>';
+}
 
+async function renderGeral() {
+  g('geral-loading').style.display='block';
+  g('geral-content').style.display='none';
+  var mes = curMes();
+  var allData = await fetchVendas(mes);
+  g('geral-content').innerHTML = buildRankingHTML(mes, allData, {
+    showFat: !!(currentUser && currentUser.isAdmin),
+    meuId: (currentUser && !currentUser.isAdmin && !currentUser.isGerente) ? currentUser.id : null
+  });
   g('geral-loading').style.display='none';
   g('geral-content').style.display='block';
 }
+
+// ===== HISTÓRICO (admin): ranking completo de um mês selecionado =====
+var histSelMes = null;
+async function renderHistorico() {
+  var cm = curMes();
+  if (!histSelMes) histSelMes = mesAnteriorStr(cm);
+  g('hist-content').innerHTML =
+    '<div class="admin-section">'+
+    '<div class="admin-sec-title"><i class="ti ti-calendar-stats"></i> Histórico do Ranking</div>'+
+    '<p style="font-size:12px;color:var(--text2);margin-bottom:10px">Escolha o mês para ver o ranking completo (idêntico ao principal) com os dados daquele mês.</p>'+
+    '<input type="month" id="hist-mes" value="'+histSelMes+'" max="'+cm+'" onchange="onHistMes(this.value)" style="padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
+    '</div>'+
+    '<div id="hist-rank"><div style="text-align:center;padding:40px;color:var(--text3)"><i class="ti ti-loader-2 spin" style="font-size:28px;display:block;margin-bottom:8px"></i>Carregando '+fmtMes(histSelMes)+'...</div></div>';
+  var allData = await fetchVendas(histSelMes);
+  var rk = g('hist-rank');
+  if (rk) rk.innerHTML = buildRankingHTML(histSelMes, allData, { showFat: true, meuId: null });
+}
+function onHistMes(val){ if(!val) return; histSelMes = val; renderHistorico(); }
+
+// ===== MINHA EQUIPE (gerente): só a unidade do gerente =====
+async function renderGerente() {
+  if (!currentUser || !currentUser.isGerente) return;
+  var el = g('ger-content');
+  el.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3)"><i class="ti ti-loader-2 spin" style="font-size:28px;display:block;margin-bottom:8px"></i>Carregando...</div>';
+  var uId = currentUser.gerenteUnidadeId;
+  var u = getUnidade(uId);
+  var niveis = appData.config.niveis;
+  var mes = curMes();
+  var allData = await fetchVendas(mes);
+  var team = (appData.vendedores||[]).filter(function(v){ return v.unidadeId===uId; });
+
+  var totalUnidade = 0;
+  var cards = team.map(function(v){
+    var d  = getSellerVendas(allData.mesAtual, v);
+    var da = getSellerVendas(allData.mesAnterior, v);
+    var nc = calcNivel(v, d, da, mes);
+    var lvl = niveis[nc.nivel]||niveis[0];
+    var nx  = niveis[nc.nivel+1];
+    totalUnidade += (d.valor||0);
+    var pctNivel = nx ? Math.min(100, Math.round(d.aparelhos/nx.minAp*100)) : 100;
+    var gapNivel = nx ? Math.max(0, nx.minAp - d.aparelhos) : 0;
+    var metaFat = (v.metaFaturamento != null) ? v.metaFaturamento : (u && u.metaFaturamento != null ? u.metaFaturamento : null);
+    var pctMeta = metaFat ? Math.min(100, Math.round(d.valor/metaFat*100)) : 0;
+    var faltaMeta = metaFat ? Math.max(0, metaFat - d.valor) : 0;
+    var metaBar = metaFat
+      ? '<div class="meta-bar" style="margin-top:10px">'+
+          '<div class="meta-bar-hd"><span class="meta-bar-label">Meta faturamento</span><span class="meta-bar-val">'+money(d.valor)+' / '+money(metaFat)+'</span></div>'+
+          '<div class="meta-bar-bg"><div class="meta-bar-fill" style="width:'+pctMeta+'%;background:'+(d.valor>=metaFat?'var(--green)':'var(--ka)')+'"></div></div>'+
+          '<div class="meta-bar-hint">'+(d.valor>=metaFat ? '✅ Meta atingida ('+pctMeta+'%)' : '⚠️ Faltam '+money(faltaMeta)+' ('+pctMeta+'%)')+'</div>'+
+        '</div>'
+      : '<div class="meta-bar" style="margin-top:10px"><div class="meta-bar-hint" style="font-style:italic">Meta a definir pelo admin</div></div>';
+    return '<div class="admin-section" style="margin-bottom:14px">'+
+      '<div style="display:flex;align-items:center;gap:12px">'+
+        '<div style="width:52px;height:52px;flex-shrink:0">'+emblemaPorNivel(nc.nivel,52)+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-weight:800;font-size:15px">'+v.nome+'</div>'+
+          '<div style="font-size:12px;color:var(--text2)">'+lvl.nome+' · '+money(d.valor)+' · '+d.aparelhos+' ap.</div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="margin-top:10px">'+
+        '<div class="meta-bar-hd"><span class="meta-bar-label">Progressão de nível'+(nx?' → '+nx.nome:'')+'</span><span class="meta-bar-val">'+(nx?d.aparelhos+' / '+nx.minAp+' ap.':'👑 Rei')+'</span></div>'+
+        '<div class="meta-bar-bg"><div class="meta-bar-fill" style="width:'+pctNivel+'%;background:var(--ka)"></div></div>'+
+        '<div class="meta-bar-hint">'+(nx?(gapNivel>0?'Faltam '+gapNivel+' aparelhos':'Na faixa de '+nx.nome+'!'):'Nível máximo')+'</div>'+
+      '</div>'+
+      metaBar+
+    '</div>';
+  }).join('');
+
+  el.innerHTML =
+    '<div class="ind-hero">'+
+      '<div class="ind-emb"><i class="ti ti-users-group" style="font-size:56px;color:var(--ka)"></i></div>'+
+      '<div>'+
+        '<div class="ind-name">'+(u?u.nome:'Minha unidade')+'</div>'+
+        '<div class="ind-lvl">'+money(totalUnidade)+'</div>'+
+        '<div class="ind-sub">Faturamento total da unidade · '+fmtMes(mes)+' · '+team.length+' vendedor(es)</div>'+
+      '</div>'+
+    '</div>'+
+    (cards || '<p style="font-size:13px;color:var(--text2)">Nenhum vendedor cadastrado nesta unidade.</p>');
+}
+
 
 async function renderInd() {
   if (!currentUser || currentUser.isAdmin) return;
@@ -1214,6 +1362,7 @@ async function renderAdmin() {
       '<td>'+(v.isSocio?'<span class="socio-badge">Sócio</span>':'<input type="number" class="adm-sal" data-id="'+v.id+'" value="'+v.salario+'" min="0" style="width:90px">')+'</td>'+
       '<td>'+(v.isSocio?'—':'<input type="number" class="adm-ben" data-id="'+v.id+'" value="'+v.beneficios+'" min="0" style="width:80px">')+'</td>'+
       '<td><div style="display:flex;align-items:center;gap:4px"><span style="color:var(--text3);font-size:12px">R$</span><input type="number" class="adm-meta" data-id="'+v.id+'" value="'+(v.metaFaturamento||'')+'" placeholder="—" min="0" step="100" style="width:100px"></div></td>'+
+      '<td><button class="btn btn-g" onclick="toggleOculto('+v.id+')" title="Mostrar/ocultar no ranking" style="font-size:12px;padding:6px 10px;white-space:nowrap">'+(v.oculto?'<i class="ti ti-eye-off" style="font-size:13px;color:var(--red)"></i> Oculto':'<i class="ti ti-eye" style="font-size:13px;color:var(--green)"></i> Visível')+'</button></td>'+
       '<td><button class="btn btn-g" onclick="resetPin('+v.id+')" style="font-size:12px;padding:6px 10px"><i class="ti ti-refresh" style="font-size:13px"></i> 1234</button></td>'+
       '<td><button class="del-btn" onclick="deleteVendedor('+v.id+')" title="Remover"><i class="ti ti-trash"></i></button></td>'+
     '</tr>';
@@ -1244,7 +1393,7 @@ async function renderAdmin() {
     '<div class="admin-sec-title"><i class="ti ti-users"></i> Vendedores</div>'+
     '<p style="font-size:12px;color:var(--text2);margin-bottom:14px">O campo <strong>Nome no GC</strong> deve ter o nome <em>exato</em> do vendedor como aparece nas vendas do Gestão Click. Se o vendedor usa mais de um nome (ex: sócio que vende em 2 lojas), separe por vírgula.</p>'+
     '<div class="atw" style="overflow-x:auto"><table class="at"><thead><tr>'+
-    '<th>Nome</th><th>Unidade</th><th>Nome no GC</th><th>Salário</th><th>Benefícios</th><th>Meta R$</th><th>PIN</th><th></th>'+
+    '<th>Nome</th><th>Unidade</th><th>Nome no GC</th><th>Salário</th><th>Benefícios</th><th>Meta R$</th><th>Ranking</th><th>PIN</th><th></th>'+
     '</tr></thead><tbody id="vend-tbody">'+vendRows+'</tbody></table></div>'+
     '<div class="btn-row">'+
     '<button class="btn btn-g" onclick="addVendedor()"><i class="ti ti-user-plus"></i> Adicionar</button>'+
@@ -1259,6 +1408,14 @@ async function renderAdmin() {
     '</div>'+
     '<div id="adm-pin-err" style="color:var(--red);font-size:12px;margin-bottom:8px;min-height:16px"></div>'+
     '<button class="btn btn-p" onclick="saveAdminPin()"><i class="ti ti-device-floppy"></i> Salvar PIN admin</button>'+
+    '</div>'+
+
+    '<div class="admin-section">'+
+    '<div class="admin-sec-title"><i class="ti ti-user-cog"></i> Gerentes (acesso por unidade)</div>'+
+    '<p style="font-size:12px;color:var(--text2);margin-bottom:14px">Cada gerente vê apenas os vendedores da sua unidade (progresso, meta e faturamento). PIN inicial <strong>1234</strong> — trocado no primeiro acesso. Use o botão para redefinir se o gerente esquecer o PIN.</p>'+
+    '<div class="atw" style="overflow-x:auto"><table class="at"><thead><tr><th>Gerente</th><th>Unidade</th><th>PIN</th></tr></thead><tbody>'+
+    (appData.gerentes||[]).map(function(gr){ var gu=getUnidade(gr.unidadeId); return '<tr><td style="font-weight:600">'+gr.nome+'</td><td style="font-size:12px;color:var(--text2)">'+(gu?gu.nome:'')+'</td><td><button class="btn btn-g" onclick="resetGerentePin('+gr.id+')" style="font-size:12px;padding:6px 10px"><i class="ti ti-refresh" style="font-size:13px"></i> 1234</button></td></tr>'; }).join('')+
+    '</tbody></table></div>'+
     '</div>';
 }
 
@@ -1292,7 +1449,7 @@ function addVendedor() {
     id: maxId+1, nome:'Novo Vendedor', nomesGC:[''], unidadeId:1,
     isSocio:false, salario:1722, beneficios:200,
     pin:'03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4',
-    pinInicial:true, metaFaturamento:null, nivelAtual:1, mesesAcima:0, mesesAbaixo:0
+    pinInicial:true, metaFaturamento:null, nivelAtual:1, mesesAcima:0, mesesAbaixo:0, oculto:false
   };
   appData.vendedores.push(newV);
   renderAdmin();
@@ -1304,6 +1461,24 @@ async function deleteVendedor(id) {
   if (!confirm('Remover este vendedor?')) return;
   appData.vendedores = appData.vendedores.filter(function(v){return v.id!==id;});
   await saveData(); renderAdmin();
+}
+
+async function toggleOculto(id) {
+  var v = getVendedor(id);
+  if (!v) return;
+  v.oculto = !v.oculto;
+  await saveData();
+  vendaCache = {};
+  renderAdmin();
+}
+
+async function resetGerentePin(id) {
+  var gr = getGerente(id);
+  if (!gr) return;
+  gr.pin = '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4';
+  gr.pinInicial = true;
+  await saveData();
+  alert('PIN de '+gr.nome+' redefinido para 1234.');
 }
 
 async function resetPin(id) {
@@ -1412,6 +1587,7 @@ document.addEventListener('keydown', function(e) {
 async function init() {
   showScreen('login');
   await loadData();
+  var w = g('db-warn'); if (w) w.style.display = dadosOk ? 'none' : 'block';
   renderLoginList();
 }
 init();
@@ -1429,7 +1605,7 @@ const ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAMFBMVEXmYwMmGx
 const ICON_512 = "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";
 const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0BAMAAADP4xsBAAAAMFBMVEXwaAIkFw6sSQKamppgKAJcXFza2tqKOQKAgH8AAAD8aQL+/v5oaGikpKQnEQFDQ0L4CIesAAAD1ElEQVR42u3bT2gcVRzA8e/+dRgkBAWJIDaIQsjFPWjRiy7YglKQAUsSI62Df2pRD57StNX2WdgQ1ENACdZDOyopSyIyhyKtWghSQURwTkF66qlITwspk8lONulhk5VsZ2fWeW8MwttLZn9v32dnfvN7LzMvk9x5snrl0bSmNa1pTWta05reG7qY9IHgl08i4xPXnYSeuYSrp8KfVo+W8NuqVEKCi71kSkeEVEJqC+HZ3wHWfu3ELs8BHB6yXpRJSHDj0IMeAK0nOsHvKwBsrBx6U6RPSN5a8noe71JpWCLXx7myvdX6J7jzZafdGQm62tw55HLn2PP29obRuJM+18HopWd2tss/bG9c73zJRwtHRVq6/MijyzHNzZHnnLQJaZFQAp7EkPkgrvE+PalqWtOa3iP6RGb0Rj0z2sguIb6uEE3vFW0m9r4/LZ13k+hbjZR0czRxt63scm2npIOvMzuN+dp/V3ybNzOjT45kRr9bzooOKgWREV2OLzYZ+hV4OiN6PxzuCjmK6ElY6AoJRfSQ7Z/bHZmqpqTL3+x+vwVdM92XqXP9fNd1STWXVfFxM4Mhsy4ASqL9M5xTQk8DMPs3wB1MG+DDdrAmST/rAlQuCmC2PWSCZgHgzC1J2h93gRUawGB7yGw5R4Fw1ZHNtTnuwm3zPIQC6hZ8xQUI33dkc21iLhM4GBabNlAlEJiCmUUVFTJMweaIy6wDTGN4UGHKlqZ9aFA6RhMGAXIwz6RFMXmCTaIdmIDHGSEQAIZA+AfhZYdRSfrqPE/WaXFCbLUDg8EpPM78xuR7srket83X/8rZ5qc/tt+fvupQeelz/INJPWNXzAr7BrzgYRgb3T0tTVww8dcp7BvwZPbaELDYNeHVTXhLQfE9FB1WUdc3osOvKaCnI+vXryqg85GThekpoEuRex0IFXPIsajgG0p+gUXWQksJPRV1FkeU0MWIZJvDSuhWRIn4lhLaiCiGdxRdh0QM9aYi2ku3dtQPfc5OMcz7oyOGutNHt2Ifnykd6I6suopollLd7fZD1+49j6tXlNDhZz/fO2RcS8VpjPr7nLmsZK+nbH8RGOuwPub8sBJ6YIhp4LFdpb6mJtcp15r1EqKmNa1pTWta05rWtKb/h/R6/INga8ylpjeoxDUXWE5NG27sk5e1UKTPdaMU12ptSZzGn0oxd8xN6zsJ+iynejfWCSToojD+6JHP4JoIqjJ3YBOMbR6IbHm1xowd2zfpceNrb/dsWnxKbjS+YPRYnwg/vix7S7py6YvI+AOzST1z+r/XNK1pTWta05rWtKb/xesuDRztr0Sd+vQAAAAASUVORK5CYII=";
 const MANIFEST = '{"name":"KING ALFA NÍVEIS","short_name":"King Níveis","description":"Programa de Níveis — Grupo King Alfa","start_url":"/","scope":"/","display":"standalone","orientation":"portrait","background_color":"#0A0A0A","theme_color":"#0A0A0A","lang":"pt-BR","icons":[{"src":"/icon-192.png?v=7","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"maskable"}]}';
-const SW_JS = `const CACHE='kingalfa-v9';
+const SW_JS = `const CACHE='kingalfa-v12';
 const SHELL=['/','/icon-192.png?v=7','/icon-512.png?v=7','/manifest.webmanifest','/emb-escudeiro.png?v=6','/emb-cavaleiro.png?v=6','/emb-duque.png?v=6','/emb-rei.png?v=6'];
 self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(SHELL);}).then(function(){return self.skipWaiting();}));});
 self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});
@@ -1563,6 +1739,31 @@ export default {
           mesAtual:    { mes,         vendas: gAtual.vendas, indexNomes: gAtual.indexNomes },
           mesAnterior: { mes: mesAnt, vendas: gAnt.vendas,   indexNomes: gAnt.indexNomes },
         }),{headers:cors});
+      } catch(e) {
+        return new Response(JSON.stringify({error:e.message}),{status:500,headers:cors});
+      }
+    }
+
+    // Proxy seguro do JSONBin: a X-Master-Key fica SO no servidor (env.JSONBIN_KEY),
+    // nunca chega ao navegador. Cliente usa GET /api/config (ler) e PUT /api/config (gravar).
+    if (url.pathname === '/api/config') {
+      if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
+      const key = env.JSONBIN_KEY;
+      if (!key) return new Response(JSON.stringify({error:'JSONBIN_KEY nao configurada no Worker'}),{status:500,headers:cors});
+      const binBase = 'https://api.jsonbin.io/v3/b/' + JSONBIN_ID;
+      try {
+        if (request.method === 'GET') {
+          const r = await fetch(binBase + '/latest', {headers:{'X-Master-Key':key,'X-Bin-Meta':'false'}});
+          const body = await r.text();
+          return new Response(body, {status:r.status, headers:cors});
+        }
+        if (request.method === 'PUT') {
+          const payload = await request.text();
+          const r = await fetch(binBase, {method:'PUT', headers:{'Content-Type':'application/json','X-Master-Key':key}, body:payload});
+          const body = await r.text();
+          return new Response(body, {status:r.status, headers:cors});
+        }
+        return new Response(JSON.stringify({error:'metodo nao suportado'}),{status:405,headers:cors});
       } catch(e) {
         return new Response(JSON.stringify({error:e.message}),{status:500,headers:cors});
       }
