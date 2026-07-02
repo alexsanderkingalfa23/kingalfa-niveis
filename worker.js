@@ -359,7 +359,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <div class="login-logo">
       <div style="font-size:22px;font-weight:800;color:var(--text)">GRUPO <span style="color:var(--ka)">KING ALFA</span></div>
       <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:uppercase;letter-spacing:2px">Programa de Níveis</div>
-      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 14 · leitura direta</div>
+      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 15 · leitura direta</div>
     </div>
     <div id="seller-step">
       <div class="login-title">Quem é você?</div>
@@ -575,8 +575,12 @@ async function loadData() {
 
 async function saveData() {
   if (!jbConfigured()) return;
-  if (!dadosOk) { console.warn('saveData BLOQUEADO: dados reais não carregados (modo fallback). Nada foi gravado.'); return; }
-  await fetch('https://api.jsonbin.io/v3/b/'+JSONBIN_ID,{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':JSONBIN_KEY},body:JSON.stringify(appData)});
+  if (!dadosOk) { console.warn('saveData BLOQUEADO: dados reais não carregados (modo fallback). Nada foi gravado.'); throw new Error('Dados não carregados (modo fallback) — nada foi gravado.'); }
+  var r = await fetch('https://api.jsonbin.io/v3/b/'+JSONBIN_ID,{method:'PUT',headers:{'Content-Type':'application/json','X-Master-Key':JSONBIN_KEY},body:JSON.stringify(appData)});
+  if (!r.ok) {
+    var txt=''; try{ txt = await r.text(); }catch(e){}
+    throw new Error('Falha ao salvar no servidor (HTTP '+r.status+'). '+txt);
+  }
 }
 
 async function fetchVendas(mes) {
@@ -801,9 +805,23 @@ async function advanceChangePin() {
     }
     var pin = changePinBuffer;
     var hash = await sha256(pin);
+    // recarrega o estado mais recente do servidor antes de gravar, pra não sobrescrever
+    // (nem ser sobrescrito por) mudanças feitas por outra sessão nesse meio-tempo
+    try { await loadData(); } catch(e){}
     var v = findUserById(currentUser.id);
+    if (!v) {
+      g('changepin-err').textContent = 'Usuário não encontrado. Tente fazer login novamente.';
+      setTimeout(function(){ showScreen('login'); }, 1800);
+      return;
+    }
     v.pin = hash; v.pinInicial = false;
-    try { await saveData(); } catch(e){}
+    try {
+      await saveData();
+    } catch(e) {
+      g('changepin-err').textContent = 'Não foi possível salvar o PIN (sem conexão ou servidor indisponível). Tente novamente.';
+      setTimeout(resetChangePin, 2200);
+      return;
+    }
     loginSuccess(currentUser);
   }
 }
@@ -1447,8 +1465,8 @@ async function saveNiveis() {
       if (maxEl && !maxEl.disabled) lv.maxAp = parseInt(maxEl.value)||lv.maxAp;
     }
   });
-  await saveData();
-  alert('Níveis salvos!');
+  try { await saveData(); alert('Níveis salvos!'); }
+  catch(e) { alert('Não foi possível salvar os níveis. Tente novamente. ('+e.message+')'); }
 }
 
 async function saveMetasUnidade() {
@@ -1456,8 +1474,8 @@ async function saveMetasUnidade() {
     var el = g('meta-u-'+u.id);
     u.metaFaturamento = el && el.value ? parseFloat(el.value) : null;
   });
-  await saveData();
-  alert('Metas por unidade salvas!');
+  try { await saveData(); alert('Metas por unidade salvas!'); }
+  catch(e) { alert('Não foi possível salvar as metas. Tente novamente. ('+e.message+')'); }
 }
 
 function addVendedor() {
@@ -1476,15 +1494,18 @@ function addVendedor() {
 
 async function deleteVendedor(id) {
   if (!confirm('Remover este vendedor?')) return;
+  var backup = appData.vendedores;
   appData.vendedores = appData.vendedores.filter(function(v){return v.id!==id;});
-  await saveData(); renderAdmin();
+  try { await saveData(); renderAdmin(); }
+  catch(e) { appData.vendedores = backup; alert('Não foi possível remover. Tente novamente. ('+e.message+')'); }
 }
 
 async function toggleOculto(id) {
   var v = getVendedor(id);
   if (!v) return;
   v.oculto = !v.oculto;
-  await saveData();
+  try { await saveData(); }
+  catch(e) { v.oculto = !v.oculto; alert('Não foi possível salvar. Tente novamente. ('+e.message+')'); }
   vendaCache = {};
   renderAdmin();
 }
@@ -1493,7 +1514,8 @@ async function toggleSocio(id) {
   var v = getVendedor(id);
   if (!v) return;
   v.isSocio = !v.isSocio;
-  await saveData();
+  try { await saveData(); }
+  catch(e) { v.isSocio = !v.isSocio; alert('Não foi possível salvar. Tente novamente. ('+e.message+')'); }
   vendaCache = {};
   renderAdmin();
 }
@@ -1503,8 +1525,8 @@ async function resetGerentePin(id) {
   if (!gr) return;
   gr.pin = '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4';
   gr.pinInicial = true;
-  await saveData();
-  alert('PIN de '+gr.nome+' redefinido para 1234.');
+  try { await saveData(); alert('PIN de '+gr.nome+' redefinido para 1234.'); }
+  catch(e) { alert('Não foi possível redefinir o PIN. Tente novamente. ('+e.message+')'); }
 }
 
 async function resetPin(id) {
@@ -1512,8 +1534,8 @@ async function resetPin(id) {
   if (!v) return;
   v.pin = '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4';
   v.pinInicial = true;
-  await saveData();
-  alert('PIN de '+v.nome+' redefinido para 1234.');
+  try { await saveData(); alert('PIN de '+v.nome+' redefinido para 1234.'); }
+  catch(e) { alert('Não foi possível redefinir o PIN. Tente novamente. ('+e.message+')'); }
 }
 
 async function saveVendedores() {
@@ -1544,10 +1566,14 @@ async function saveVendedores() {
     var id = parseInt(el.dataset.id), v = getVendedor(id);
     if (v) v.metaFaturamento = el.value ? parseFloat(el.value) : null;
   });
-  await saveData();
-  vendaCache = {};
-  alert('Vendedores salvos!');
-  renderAdmin();
+  try {
+    await saveData();
+    vendaCache = {};
+    alert('Vendedores salvos!');
+    renderAdmin();
+  } catch(e) {
+    alert('Não foi possível salvar. Tente novamente. ('+e.message+')');
+  }
 }
 
 async function saveAdminPin() {
@@ -1556,8 +1582,8 @@ async function saveAdminPin() {
   if (p1.length!==4||!/^\d+$/.test(p1)){g('adm-pin-err').textContent='PIN deve ter 4 dígitos';return;}
   if (p1!==p2){g('adm-pin-err').textContent='PINs não coincidem';return;}
   appData.adminPin = await sha256(p1);
-  await saveData();
-  alert('PIN admin alterado!');
+  try { await saveData(); alert('PIN admin alterado!'); }
+  catch(e) { alert('Não foi possível salvar. Tente novamente. ('+e.message+')'); }
 }
 
 async function syncGestaoClick() {
@@ -1566,6 +1592,9 @@ async function syncGestaoClick() {
   msg.innerHTML='<i class="ti ti-loader-2 spin"></i> Buscando dados do Gestão Click...';
   msg.style.display='flex';
   try {
+    // recarrega o estado mais recente do servidor antes de mexer e gravar —
+    // evita sobrescrever PIN/dados que vendedores mudaram depois que esta aba abriu
+    await loadData();
     var mes = curMes();
     var niveis = appData.config.niveis;
     vendaCache = {};
@@ -1631,7 +1660,7 @@ const ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAMFBMVEXmYwMmGx
 const ICON_512 = "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";
 const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0BAMAAADP4xsBAAAAMFBMVEXwaAIkFw6sSQKamppgKAJcXFza2tqKOQKAgH8AAAD8aQL+/v5oaGikpKQnEQFDQ0L4CIesAAAD1ElEQVR42u3bT2gcVRzA8e/+dRgkBAWJIDaIQsjFPWjRiy7YglKQAUsSI62Df2pRD57StNX2WdgQ1ENACdZDOyopSyIyhyKtWghSQURwTkF66qlITwspk8lONulhk5VsZ2fWeW8MwttLZn9v32dnfvN7LzMvk9x5snrl0bSmNa1pTWta05reG7qY9IHgl08i4xPXnYSeuYSrp8KfVo+W8NuqVEKCi71kSkeEVEJqC+HZ3wHWfu3ELs8BHB6yXpRJSHDj0IMeAK0nOsHvKwBsrBx6U6RPSN5a8noe71JpWCLXx7myvdX6J7jzZafdGQm62tw55HLn2PP29obRuJM+18HopWd2tss/bG9c73zJRwtHRVq6/MijyzHNzZHnnLQJaZFQAp7EkPkgrvE+PalqWtOa3iP6RGb0Rj0z2sguIb6uEE3vFW0m9r4/LZ13k+hbjZR0czRxt63scm2npIOvMzuN+dp/V3ybNzOjT45kRr9bzooOKgWREV2OLzYZ+hV4OiN6PxzuCjmK6ElY6AoJRfSQ7Z/bHZmqpqTL3+x+vwVdM92XqXP9fNd1STWXVfFxM4Mhsy4ASqL9M5xTQk8DMPs3wB1MG+DDdrAmST/rAlQuCmC2PWSCZgHgzC1J2h93gRUawGB7yGw5R4Fw1ZHNtTnuwm3zPIQC6hZ8xQUI33dkc21iLhM4GBabNlAlEJiCmUUVFTJMweaIy6wDTGN4UGHKlqZ9aFA6RhMGAXIwz6RFMXmCTaIdmIDHGSEQAIZA+AfhZYdRSfrqPE/WaXFCbLUDg8EpPM78xuR7srket83X/8rZ5qc/tt+fvupQeelz/INJPWNXzAr7BrzgYRgb3T0tTVww8dcp7BvwZPbaELDYNeHVTXhLQfE9FB1WUdc3osOvKaCnI+vXryqg85GThekpoEuRex0IFXPIsajgG0p+gUXWQksJPRV1FkeU0MWIZJvDSuhWRIn4lhLaiCiGdxRdh0QM9aYi2ku3dtQPfc5OMcz7oyOGutNHt2Ifnykd6I6suopollLd7fZD1+49j6tXlNDhZz/fO2RcS8VpjPr7nLmsZK+nbH8RGOuwPub8sBJ6YIhp4LFdpb6mJtcp15r1EqKmNa1pTWta05rWtKb/h/R6/INga8ylpjeoxDUXWE5NG27sk5e1UKTPdaMU12ptSZzGn0oxd8xN6zsJ+iynejfWCSToojD+6JHP4JoIqjJ3YBOMbR6IbHm1xowd2zfpceNrb/dsWnxKbjS+YPRYnwg/vix7S7py6YvI+AOzST1z+r/XNK1pTWta05rWtKb/xesuDRztr0Sd+vQAAAAASUVORK5CYII=";
 const MANIFEST = '{"name":"KING ALFA NÍVEIS","short_name":"King Níveis","description":"Programa de Níveis — Grupo King Alfa","start_url":"/","scope":"/","display":"standalone","orientation":"portrait","background_color":"#0A0A0A","theme_color":"#0A0A0A","lang":"pt-BR","icons":[{"src":"/icon-192.png?v=7","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"maskable"}]}';
-const SW_JS = `const CACHE='kingalfa-v14';
+const SW_JS = `const CACHE='kingalfa-v15';
 const SHELL=['/','/icon-192.png?v=7','/icon-512.png?v=7','/manifest.webmanifest','/emb-escudeiro.png?v=6','/emb-cavaleiro.png?v=6','/emb-duque.png?v=6','/emb-rei.png?v=6'];
 self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(SHELL);}).then(function(){return self.skipWaiting();}));});
 self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});
