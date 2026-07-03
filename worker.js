@@ -359,7 +359,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <div class="login-logo">
       <div style="font-size:22px;font-weight:800;color:var(--text)">GRUPO <span style="color:var(--ka)">KING ALFA</span></div>
       <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:uppercase;letter-spacing:2px">Programa de Níveis</div>
-      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 15 · leitura direta</div>
+      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 18 · leitura direta</div>
     </div>
     <div id="seller-step">
       <div class="login-title">Quem é você?</div>
@@ -836,6 +836,7 @@ function loginSuccess(user) {
     showScreen('app'); showTab('geral');
   } else if (user.isGerente) {
     g('tab-ger').style.display='flex';
+    g('tab-hist').style.display='flex';
     g('tab-geral').style.display='none';
     showScreen('app'); showTab('ger');
   } else {
@@ -876,29 +877,37 @@ function buildRankingHTML(mes, allData, opts) {
   var isAdminGeral = !!opts.showFat;
   var meuId = (opts.meuId != null) ? opts.meuId : null;
   var niveis = appData.config.niveis;
-  var unidades = appData.unidades;
-  var vendedores = (appData.vendedores||[]).filter(function(v){ return !v.oculto; });
+  var unidades = opts.unidadeId ? appData.unidades.filter(function(u){ return u.id===opts.unidadeId; }) : appData.unidades;
+  var todosVendedores = (appData.vendedores||[]).filter(function(v){ return !opts.unidadeId || v.unidadeId===opts.unidadeId; });
+  var vendedores = todosVendedores.filter(function(v){ return !v.oculto; });
 
-  var sellerStats = vendedores.map(function(v) {
-    var u = getUnidade(v.unidadeId);
-    var atualData = getSellerVendas(allData.mesAtual, v);
-    var anteriorData = getSellerVendas(allData.mesAnterior, v);
-    var nivelCalc = calcNivel(v, atualData, anteriorData, mes);
-    var lvl = niveis[nivelCalc.nivel]||niveis[0];
-    return {
-      v:v, u:u, lvl:lvl,
-      aparelhos: atualData.aparelhos,
-      servicos:  atualData.servicos,
-      valor:     atualData.valor||0,
-      nivelId:   nivelCalc.nivel
-    };
-  }).sort(function(a,b){ return (b.valor||0) - (a.valor||0); });
+  function calcStats(lista) {
+    return lista.map(function(v) {
+      var u = getUnidade(v.unidadeId);
+      var atualData = getSellerVendas(allData.mesAtual, v);
+      var anteriorData = getSellerVendas(allData.mesAnterior, v);
+      var nivelCalc = calcNivel(v, atualData, anteriorData, mes);
+      var lvl = niveis[nivelCalc.nivel]||niveis[0];
+      return {
+        v:v, u:u, lvl:lvl,
+        aparelhos: atualData.aparelhos,
+        servicos:  atualData.servicos,
+        valor:     atualData.valor||0,
+        nivelId:   nivelCalc.nivel
+      };
+    }).sort(function(a,b){ return (b.valor||0) - (a.valor||0); });
+  }
+
+  var sellerStats = calcStats(vendedores);
+  // usado só pra somar o faturamento/aparelhos REAIS da loja, incluindo vendedores ocultos do ranking
+  var sellerStatsTodos = (todosVendedores.length === vendedores.length) ? sellerStats : calcStats(todosVendedores);
 
   var unitStats = unidades.map(function(u) {
-    var us = sellerStats.filter(function(s){ return s.u&&s.u.id===u.id; });
+    var us = sellerStatsTodos.filter(function(s){ return s.u&&s.u.id===u.id; });
+    var usVisiveis = sellerStats.filter(function(s){ return s.u&&s.u.id===u.id; });
     var totalAp = us.reduce(function(sum,s){ return sum+s.aparelhos; },0);
     var totalValor = us.reduce(function(sum,s){ return sum+(s.valor||0); },0);
-    return {u:u, totalAp:totalAp, totalValor:totalValor, count:us.length};
+    return {u:u, totalAp:totalAp, totalValor:totalValor, count:usVisiveis.length};
   }).sort(function(a,b){ return b.totalValor-a.totalValor; });
 
   var totalAp = sellerStats.reduce(function(s,x){ return s+x.aparelhos; },0);
@@ -988,18 +997,25 @@ async function renderGeral() {
 // ===== HISTÓRICO (admin): ranking completo de um mês selecionado =====
 var histSelMes = null;
 async function renderHistorico() {
+  var isGer = !!(currentUser && currentUser.isGerente);
+  var uId = isGer ? currentUser.gerenteUnidadeId : null;
+  var u = isGer ? getUnidade(uId) : null;
   var cm = curMes();
   if (!histSelMes) histSelMes = mesAnteriorStr(cm);
+  var titulo = isGer ? ('Histórico — '+(u?u.nome:'minha unidade')) : 'Histórico do Ranking';
+  var sub = isGer
+    ? 'Escolha o mês pra ver o ranking da sua unidade (vendedores e faturamento) naquele mês.'
+    : 'Escolha o mês para ver o ranking completo (idêntico ao principal) com os dados daquele mês.';
   g('hist-content').innerHTML =
     '<div class="admin-section">'+
-    '<div class="admin-sec-title"><i class="ti ti-calendar-stats"></i> Histórico do Ranking</div>'+
-    '<p style="font-size:12px;color:var(--text2);margin-bottom:10px">Escolha o mês para ver o ranking completo (idêntico ao principal) com os dados daquele mês.</p>'+
+    '<div class="admin-sec-title"><i class="ti ti-calendar-stats"></i> '+titulo+'</div>'+
+    '<p style="font-size:12px;color:var(--text2);margin-bottom:10px">'+sub+'</p>'+
     '<input type="month" id="hist-mes" value="'+histSelMes+'" max="'+cm+'" onchange="onHistMes(this.value)" style="padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
     '</div>'+
     '<div id="hist-rank"><div style="text-align:center;padding:40px;color:var(--text3)"><i class="ti ti-loader-2 spin" style="font-size:28px;display:block;margin-bottom:8px"></i>Carregando '+fmtMes(histSelMes)+'...</div></div>';
   var allData = await fetchVendas(histSelMes);
   var rk = g('hist-rank');
-  if (rk) rk.innerHTML = buildRankingHTML(histSelMes, allData, { showFat: true, meuId: null });
+  if (rk) rk.innerHTML = buildRankingHTML(histSelMes, allData, { showFat: true, meuId: null, unidadeId: uId });
 }
 function onHistMes(val){ if(!val) return; histSelMes = val; renderHistorico(); }
 
@@ -1438,8 +1454,8 @@ async function renderAdmin() {
     '<div class="admin-section">'+
     '<div class="admin-sec-title"><i class="ti ti-lock"></i> Alterar PIN do Admin</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">'+
-    '<div><label class="fl">Novo PIN</label><input type="password" id="adm-pin1" class="fi" maxlength="4" placeholder="••••"></div>'+
-    '<div><label class="fl">Confirmar</label><input type="password" id="adm-pin2" class="fi" maxlength="4" placeholder="••••"></div>'+
+    '<div><label class="fl">Novo PIN</label><input type="password" id="adm-pin1" class="fi" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" placeholder="••••" oninput="this.value=this.value.replace(/\\D/g,\'\').slice(0,4)"></div>'+
+    '<div><label class="fl">Confirmar</label><input type="password" id="adm-pin2" class="fi" maxlength="4" inputmode="numeric" pattern="[0-9]*" autocomplete="new-password" placeholder="••••" oninput="this.value=this.value.replace(/\\D/g,\'\').slice(0,4)"></div>'+
     '</div>'+
     '<div id="adm-pin-err" style="color:var(--red);font-size:12px;margin-bottom:8px;min-height:16px"></div>'+
     '<button class="btn btn-p" onclick="saveAdminPin()"><i class="ti ti-device-floppy"></i> Salvar PIN admin</button>'+
@@ -1577,9 +1593,10 @@ async function saveVendedores() {
 }
 
 async function saveAdminPin() {
-  var p1 = g('adm-pin1').value, p2 = g('adm-pin2').value;
+  var p1 = (g('adm-pin1').value||'').replace(/\D/g,''), p2 = (g('adm-pin2').value||'').replace(/\D/g,'');
   g('adm-pin-err').textContent = '';
-  if (p1.length!==4||!/^\d+$/.test(p1)){g('adm-pin-err').textContent='PIN deve ter 4 dígitos';return;}
+  if (p1.length!==4){g('adm-pin-err').textContent='PIN deve ter 4 dígitos (você digitou '+p1.length+').';return;}
+  if (p2.length!==4){g('adm-pin-err').textContent='Confirmação deve ter 4 dígitos (você digitou '+p2.length+').';return;}
   if (p1!==p2){g('adm-pin-err').textContent='PINs não coincidem';return;}
   appData.adminPin = await sha256(p1);
   try { await saveData(); alert('PIN admin alterado!'); }
@@ -1660,7 +1677,7 @@ const ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAMFBMVEXmYwMmGx
 const ICON_512 = "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";
 const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0BAMAAADP4xsBAAAAMFBMVEXwaAIkFw6sSQKamppgKAJcXFza2tqKOQKAgH8AAAD8aQL+/v5oaGikpKQnEQFDQ0L4CIesAAAD1ElEQVR42u3bT2gcVRzA8e/+dRgkBAWJIDaIQsjFPWjRiy7YglKQAUsSI62Df2pRD57StNX2WdgQ1ENACdZDOyopSyIyhyKtWghSQURwTkF66qlITwspk8lONulhk5VsZ2fWeW8MwttLZn9v32dnfvN7LzMvk9x5snrl0bSmNa1pTWta05reG7qY9IHgl08i4xPXnYSeuYSrp8KfVo+W8NuqVEKCi71kSkeEVEJqC+HZ3wHWfu3ELs8BHB6yXpRJSHDj0IMeAK0nOsHvKwBsrBx6U6RPSN5a8noe71JpWCLXx7myvdX6J7jzZafdGQm62tw55HLn2PP29obRuJM+18HopWd2tss/bG9c73zJRwtHRVq6/MijyzHNzZHnnLQJaZFQAp7EkPkgrvE+PalqWtOa3iP6RGb0Rj0z2sguIb6uEE3vFW0m9r4/LZ13k+hbjZR0czRxt63scm2npIOvMzuN+dp/V3ybNzOjT45kRr9bzooOKgWREV2OLzYZ+hV4OiN6PxzuCjmK6ElY6AoJRfSQ7Z/bHZmqpqTL3+x+vwVdM92XqXP9fNd1STWXVfFxM4Mhsy4ASqL9M5xTQk8DMPs3wB1MG+DDdrAmST/rAlQuCmC2PWSCZgHgzC1J2h93gRUawGB7yGw5R4Fw1ZHNtTnuwm3zPIQC6hZ8xQUI33dkc21iLhM4GBabNlAlEJiCmUUVFTJMweaIy6wDTGN4UGHKlqZ9aFA6RhMGAXIwz6RFMXmCTaIdmIDHGSEQAIZA+AfhZYdRSfrqPE/WaXFCbLUDg8EpPM78xuR7srket83X/8rZ5qc/tt+fvupQeelz/INJPWNXzAr7BrzgYRgb3T0tTVww8dcp7BvwZPbaELDYNeHVTXhLQfE9FB1WUdc3osOvKaCnI+vXryqg85GThekpoEuRex0IFXPIsajgG0p+gUXWQksJPRV1FkeU0MWIZJvDSuhWRIn4lhLaiCiGdxRdh0QM9aYi2ku3dtQPfc5OMcz7oyOGutNHt2Ifnykd6I6suopollLd7fZD1+49j6tXlNDhZz/fO2RcS8VpjPr7nLmsZK+nbH8RGOuwPub8sBJ6YIhp4LFdpb6mJtcp15r1EqKmNa1pTWta05rWtKb/h/R6/INga8ylpjeoxDUXWE5NG27sk5e1UKTPdaMU12ptSZzGn0oxd8xN6zsJ+iynejfWCSToojD+6JHP4JoIqjJ3YBOMbR6IbHm1xowd2zfpceNrb/dsWnxKbjS+YPRYnwg/vix7S7py6YvI+AOzST1z+r/XNK1pTWta05rWtKb/xesuDRztr0Sd+vQAAAAASUVORK5CYII=";
 const MANIFEST = '{"name":"KING ALFA NÍVEIS","short_name":"King Níveis","description":"Programa de Níveis — Grupo King Alfa","start_url":"/","scope":"/","display":"standalone","orientation":"portrait","background_color":"#0A0A0A","theme_color":"#0A0A0A","lang":"pt-BR","icons":[{"src":"/icon-192.png?v=7","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"maskable"}]}';
-const SW_JS = `const CACHE='kingalfa-v15';
+const SW_JS = `const CACHE='kingalfa-v18';
 const SHELL=['/','/icon-192.png?v=7','/icon-512.png?v=7','/manifest.webmanifest','/emb-escudeiro.png?v=6','/emb-cavaleiro.png?v=6','/emb-duque.png?v=6','/emb-rei.png?v=6'];
 self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(SHELL);}).then(function(){return self.skipWaiting();}));});
 self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});
