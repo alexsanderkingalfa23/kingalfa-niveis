@@ -70,7 +70,20 @@ function group(vendas) {
     if (!r[id].porLoja[lj]) r[id].porLoja[lj] = {aparelhos:0, servicos:0, balcao:0, valor:0, valorAparelhos:0, valorServicos:0, valorBalcao:0};
     const pl = r[id].porLoja[lj];
     if (tipo==='aparelho') { r[id].aparelhos++; r[id].valorAparelhos += valor; pl.aparelhos++; pl.valorAparelhos += valor; }
-    else if (tipo==='servico') { r[id].servicos++; r[id].valorServicos += valor; pl.servicos++; pl.valorServicos += valor; }
+    else if (tipo==='servico') {
+      // Uma venda de serviço pode ter produtos/acessórios lançados junto (mesmo registro).
+      // A API do GC já separa os valores internamente (valor_servicos / valor_produtos) —
+      // usamos essa separação pra contar a parte de produto como BALCÃO, em vez de tudo
+      // virar faturamento de serviço.
+      var valorProdEmbutido = parseFloat(v.valor_produtos||0);
+      var valorServPuro = parseFloat(v.valor_servicos||0);
+      if (valorProdEmbutido > 0 && (valorServPuro + valorProdEmbutido) > 0) {
+        r[id].servicos++; r[id].valorServicos += valorServPuro; pl.servicos++; pl.valorServicos += valorServPuro;
+        r[id].balcao++;   r[id].valorBalcao   += valorProdEmbutido; pl.balcao++;   pl.valorBalcao   += valorProdEmbutido;
+      } else {
+        r[id].servicos++; r[id].valorServicos += valor; pl.servicos++; pl.valorServicos += valor;
+      }
+    }
     else if (tipo==='balcao') { r[id].balcao++; r[id].valorBalcao += valor; pl.balcao++; pl.valorBalcao += valor; }
     r[id].valor += valor;
     pl.valor += valor;
@@ -359,7 +372,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <div class="login-logo">
       <div style="font-size:22px;font-weight:800;color:var(--text)">GRUPO <span style="color:var(--ka)">KING ALFA</span></div>
       <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:uppercase;letter-spacing:2px">Programa de Níveis</div>
-      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 19 · leitura direta</div>
+      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 20 · leitura direta</div>
     </div>
     <div id="seller-step">
       <div class="login-title">Quem é você?</div>
@@ -1682,7 +1695,7 @@ const ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAMFBMVEXmYwMmGx
 const ICON_512 = "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";
 const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0BAMAAADP4xsBAAAAMFBMVEXwaAIkFw6sSQKamppgKAJcXFza2tqKOQKAgH8AAAD8aQL+/v5oaGikpKQnEQFDQ0L4CIesAAAD1ElEQVR42u3bT2gcVRzA8e/+dRgkBAWJIDaIQsjFPWjRiy7YglKQAUsSI62Df2pRD57StNX2WdgQ1ENACdZDOyopSyIyhyKtWghSQURwTkF66qlITwspk8lONulhk5VsZ2fWeW8MwttLZn9v32dnfvN7LzMvk9x5snrl0bSmNa1pTWta05reG7qY9IHgl08i4xPXnYSeuYSrp8KfVo+W8NuqVEKCi71kSkeEVEJqC+HZ3wHWfu3ELs8BHB6yXpRJSHDj0IMeAK0nOsHvKwBsrBx6U6RPSN5a8noe71JpWCLXx7myvdX6J7jzZafdGQm62tw55HLn2PP29obRuJM+18HopWd2tss/bG9c73zJRwtHRVq6/MijyzHNzZHnnLQJaZFQAp7EkPkgrvE+PalqWtOa3iP6RGb0Rj0z2sguIb6uEE3vFW0m9r4/LZ13k+hbjZR0czRxt63scm2npIOvMzuN+dp/V3ybNzOjT45kRr9bzooOKgWREV2OLzYZ+hV4OiN6PxzuCjmK6ElY6AoJRfSQ7Z/bHZmqpqTL3+x+vwVdM92XqXP9fNd1STWXVfFxM4Mhsy4ASqL9M5xTQk8DMPs3wB1MG+DDdrAmST/rAlQuCmC2PWSCZgHgzC1J2h93gRUawGB7yGw5R4Fw1ZHNtTnuwm3zPIQC6hZ8xQUI33dkc21iLhM4GBabNlAlEJiCmUUVFTJMweaIy6wDTGN4UGHKlqZ9aFA6RhMGAXIwz6RFMXmCTaIdmIDHGSEQAIZA+AfhZYdRSfrqPE/WaXFCbLUDg8EpPM78xuR7srket83X/8rZ5qc/tt+fvupQeelz/INJPWNXzAr7BrzgYRgb3T0tTVww8dcp7BvwZPbaELDYNeHVTXhLQfE9FB1WUdc3osOvKaCnI+vXryqg85GThekpoEuRex0IFXPIsajgG0p+gUXWQksJPRV1FkeU0MWIZJvDSuhWRIn4lhLaiCiGdxRdh0QM9aYi2ku3dtQPfc5OMcz7oyOGutNHt2Ifnykd6I6suopollLd7fZD1+49j6tXlNDhZz/fO2RcS8VpjPr7nLmsZK+nbH8RGOuwPub8sBJ6YIhp4LFdpb6mJtcp15r1EqKmNa1pTWta05rWtKb/h/R6/INga8ylpjeoxDUXWE5NG27sk5e1UKTPdaMU12ptSZzGn0oxd8xN6zsJ+iynejfWCSToojD+6JHP4JoIqjJ3YBOMbR6IbHm1xowd2zfpceNrb/dsWnxKbjS+YPRYnwg/vix7S7py6YvI+AOzST1z+r/XNK1pTWta05rWtKb/xesuDRztr0Sd+vQAAAAASUVORK5CYII=";
 const MANIFEST = '{"name":"KING ALFA NÍVEIS","short_name":"King Níveis","description":"Programa de Níveis — Grupo King Alfa","start_url":"/","scope":"/","display":"standalone","orientation":"portrait","background_color":"#0A0A0A","theme_color":"#0A0A0A","lang":"pt-BR","icons":[{"src":"/icon-192.png?v=7","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"maskable"}]}';
-const SW_JS = `const CACHE='kingalfa-v19';
+const SW_JS = `const CACHE='kingalfa-v20';
 const SHELL=['/','/icon-192.png?v=7','/icon-512.png?v=7','/manifest.webmanifest','/emb-escudeiro.png?v=6','/emb-cavaleiro.png?v=6','/emb-duque.png?v=6','/emb-rei.png?v=6'];
 self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(SHELL);}).then(function(){return self.skipWaiting();}));});
 self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});
@@ -1752,7 +1765,11 @@ export default {
           const tipo = classify(v.nome_situacao||'', v.__tipoGC);
           if (!tipo) { roster[id].ignoradas++; return; }
           if (tipo==='aparelho') roster[id].aparelhos++;
-          else if (tipo==='servico') roster[id].servicos++;
+          else if (tipo==='servico') {
+            var vProdEmb = parseFloat(v.valor_produtos||0);
+            if (vProdEmb > 0) { roster[id].servicos++; roster[id].balcao++; }
+            else { roster[id].servicos++; }
+          }
           else if (tipo==='balcao') roster[id].balcao++;
           roster[id].valor += parseFloat(v.valor_total||0);
         });
