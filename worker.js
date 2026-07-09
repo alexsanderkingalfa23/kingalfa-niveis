@@ -180,6 +180,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .tab{padding:14px 18px;font-size:13px;font-weight:600;color:var(--text2);cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;margin-bottom:-1px;display:flex;align-items:center;gap:6px;transition:all .15s;white-space:nowrap}
 .tab.on{color:var(--ka);border-bottom-color:var(--ka)}
 .tab:hover:not(.on){color:var(--text)}
+.ger-subnav{display:flex;gap:6px;margin-bottom:16px;background:var(--bg-elev);padding:4px;border-radius:12px}
+.ger-subbtn{flex:1;padding:11px 14px;font-size:13px;font-weight:700;color:var(--text2);cursor:pointer;border:none;background:none;border-radius:9px;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .15s}
+.ger-subbtn.active{background:var(--bg-card);color:var(--ka);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.ger-sel{width:100%;padding:12px 14px;font-size:14px;font-weight:600;color:var(--text);background:var(--bg-card);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;cursor:pointer}
 
 .view{display:none;flex:1;overflow-y:auto}
 .view.on{display:block}
@@ -372,7 +376,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <div class="login-logo">
       <div style="font-size:22px;font-weight:800;color:var(--text)">GRUPO <span style="color:var(--ka)">KING ALFA</span></div>
       <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:uppercase;letter-spacing:2px">Programa de Níveis</div>
-      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 20 · leitura direta</div>
+      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 21 · leitura direta</div>
     </div>
     <div id="seller-step">
       <div class="login-title">Quem é você?</div>
@@ -447,7 +451,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <button class="tab" id="tab-admin" onclick="showTab('admin')" style="display:none"><i class="ti ti-settings"></i><span> Admin</span></button>
     <button class="tab" id="tab-acomp" onclick="showTab('acomp')" style="display:none"><i class="ti ti-history"></i><span> Acompanhamento</span></button>
     <button class="tab" id="tab-hist" onclick="showTab('hist')" style="display:none"><i class="ti ti-calendar-stats"></i><span> Histórico</span></button>
-    <button class="tab" id="tab-ger" onclick="showTab('ger')" style="display:none"><i class="ti ti-users-group"></i><span> Minha Equipe</span></button>
+    <button class="tab" id="tab-ger" onclick="showTab('ger')" style="display:none"><i class="ti ti-users-group"></i><span> Gerência</span></button>
   </div>
   <div id="view-geral" class="view on">
     <div class="vg-wrap">
@@ -1096,19 +1100,115 @@ async function renderGerente() {
       '</div>'
     : '<div class="meta-bar" style="margin-top:14px"><div class="meta-bar-hint" style="font-style:italic">Meta da unidade a definir pelo admin</div></div>';
 
+  var optsVend = '<option value="">— selecione um vendedor —</option>' +
+    team.map(function(v){ return '<option value="'+v.id+'">'+v.nome+(v.isSocio?' (sócio)':'')+'</option>'; }).join('');
+
   el.innerHTML =
-    '<div class="ind-hero">'+
-      '<div class="ind-emb"><i class="ti ti-users-group" style="font-size:56px;color:var(--ka)"></i></div>'+
-      '<div>'+
-        '<div class="ind-name">'+(u?u.nome:'Minha unidade')+'</div>'+
-        '<div class="ind-lvl">'+money(totalUnidade)+'</div>'+
-        '<div class="ind-sub">Faturamento total da unidade · '+fmtMes(mes)+' · '+team.length+' vendedor(es) · '+totalAparelhosUnidade+' aparelho(s) vendido(s)</div>'+
-      '</div>'+
+    '<div class="ger-subnav">'+
+      '<button id="ger-sub-btn-equipe" class="ger-subbtn active" type="button"><i class="ti ti-users-group"></i> Minha Equipe</button>'+
+      '<button id="ger-sub-btn-comissao" class="ger-subbtn" type="button"><i class="ti ti-cash"></i> Comissão</button>'+
     '</div>'+
-    metaUnidadeHtml+
-    (cards || '<p style="font-size:13px;color:var(--text2)">Nenhum vendedor cadastrado nesta unidade.</p>');
+    '<div id="ger-sub-equipe">'+
+      '<div class="ind-hero">'+
+        '<div class="ind-emb"><i class="ti ti-users-group" style="font-size:56px;color:var(--ka)"></i></div>'+
+        '<div>'+
+          '<div class="ind-name">'+(u?u.nome:'Minha unidade')+'</div>'+
+          '<div class="ind-lvl">'+money(totalUnidade)+'</div>'+
+          '<div class="ind-sub">Faturamento total da unidade · '+fmtMes(mes)+' · '+team.length+' vendedor(es) · '+totalAparelhosUnidade+' aparelho(s) vendido(s)</div>'+
+        '</div>'+
+      '</div>'+
+      metaUnidadeHtml+
+      (cards || '<p style="font-size:13px;color:var(--text2)">Nenhum vendedor cadastrado nesta unidade.</p>')+
+    '</div>'+
+    '<div id="ger-sub-comissao" style="display:none">'+
+      '<p style="font-size:13px;color:var(--text2);margin-bottom:12px">Escolha um vendedor da sua unidade para ver o cálculo de remuneração do mês — o mesmo que ele enxerga no dashboard dele.</p>'+
+      '<select id="ger-comissao-select" class="ger-sel">'+optsVend+'</select>'+
+      '<div id="ger-comissao-result"><p style="font-size:13px;color:var(--text2);text-align:center;padding:30px 10px">Nenhum vendedor selecionado.</p></div>'+
+    '</div>';
+
+  // Binding via JS (sem handler inline com aspas — regra BUILD 18/19)
+  var beq = g('ger-sub-btn-equipe'), bco = g('ger-sub-btn-comissao'), sel = g('ger-comissao-select');
+  if (beq) beq.onclick = function(){ gerSetSub('equipe'); };
+  if (bco) bco.onclick = function(){ gerSetSub('comissao'); };
+  if (sel) sel.onchange = function(){ gerVerComissao(this.value); };
 }
 
+
+// ===== Remuneração — FONTE ÚNICA (usada no dashboard do vendedor E na aba Comissão do gerente) =====
+function calcRemun(v, atualData, lvl) {
+  var commAp   = v.isSocio ? 0 : Math.round(lvl.pct * atualData.valorAparelhos);
+  var commBalc = v.isSocio ? 0 : Math.round(0.04 * atualData.valorBalcao);
+  var total    = v.isSocio ? 0 : v.salario + v.beneficios + commAp + commBalc;
+  return { commAp: commAp, commBalc: commBalc, total: total };
+}
+function metaBatidaFor(v, u, atualData) {
+  var metaFat = (v.metaFaturamento != null) ? v.metaFaturamento : (u && u.metaFaturamento != null ? u.metaFaturamento : null);
+  return !metaFat || (atualData.valor >= metaFat);
+}
+function remunCardHTML(v, atualData, lvl, metaBatida) {
+  if (v.isSocio) return '';
+  var pctVal = (lvl.pct*100).toFixed(2).replace('.',',')+'%';
+  var r = calcRemun(v, atualData, lvl);
+  return '<div class="remun-card">'+
+    '<div class="remun-title"><i class="ti ti-cash"></i> Remuneração estimada — '+fmtMes(curMes())+'</div>'+
+    '<div class="remun-row"><span class="remun-label">Salário fixo</span><span class="remun-val">'+money(v.salario)+'</span></div>'+
+    '<div class="remun-row"><span class="remun-label">Benefícios</span><span class="remun-val">'+money(v.beneficios)+'</span></div>'+
+    '<div class="remun-row"><span class="remun-label">Comissão financeiras ('+pctVal+')</span><span class="remun-val">'+money(r.commAp)+'</span></div>'+
+    '<div class="remun-row"'+(metaBatida?'':' style="opacity:.45"')+'><span class="remun-label">Comissão Balcão (4%)'+(metaBatida?'':' <span style="font-size:11px;color:var(--text3)"><i class="ti ti-lock" style="font-size:11px"></i> libera ao bater a meta</span>')+'</span><span class="remun-val">'+money(r.commBalc)+'</span></div>'+
+    '<div class="remun-row"><span class="remun-total-label">Total estimado</span><span class="remun-total-val">'+money(r.total)+'</span></div>'+
+    '</div>';
+}
+
+// ===== Aba Comissão do gerente =====
+function gerSetSub(view) {
+  var eqp = g('ger-sub-equipe'), com = g('ger-sub-comissao');
+  var be = g('ger-sub-btn-equipe'), bc = g('ger-sub-btn-comissao');
+  var isCom = (view === 'comissao');
+  if (eqp) eqp.style.display = isCom ? 'none' : '';
+  if (com) com.style.display = isCom ? '' : 'none';
+  if (be) be.classList.toggle('active', !isCom);
+  if (bc) bc.classList.toggle('active', isCom);
+}
+async function gerVerComissao(id) {
+  var box = g('ger-comissao-result');
+  if (!box) return;
+  if (!id) {
+    box.innerHTML = '<p style="font-size:13px;color:var(--text2);text-align:center;padding:30px 10px">Selecione um vendedor para ver salário, benefícios e comissão do mês.</p>';
+    return;
+  }
+  var v = getVendedor(parseInt(id, 10));
+  if (!v || !currentUser || v.unidadeId !== currentUser.gerenteUnidadeId) { box.innerHTML = ''; return; }
+  var u = getUnidade(v.unidadeId);
+  var mes = curMes();
+  box.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)"><i class="ti ti-loader-2 spin" style="font-size:24px;display:block;margin-bottom:8px"></i>Carregando...</div>';
+  var data = await fetchVendas(mes);
+  var atualData    = getSellerVendas(data.mesAtual, v);
+  var anteriorData = getSellerVendas(data.mesAnterior, v);
+  var nivelCalc = calcNivel(v, atualData, anteriorData, mes);
+  var lvl = appData.config.niveis[nivelCalc.nivel] || appData.config.niveis[0];
+  var pctVal = (lvl.pct*100).toFixed(2).replace('.',',')+'%';
+  var metaBatida = metaBatidaFor(v, u, atualData);
+  var header =
+    '<div class="ind-hero" style="margin-bottom:16px">'+
+      '<div class="ind-emb">'+emblemaPorNivel(nivelCalc.nivel, 64)+'</div>'+
+      '<div>'+
+        '<div class="ind-name">'+v.nome+'</div>'+
+        '<div class="ind-lvl">'+lvl.nome+'</div>'+
+        '<div class="ind-sub">'+(u?u.nome:'')+' · '+pctVal+' de comissão · '+fmtMes(mes)+'</div>'+
+      '</div>'+
+    '</div>';
+  var baseCalc =
+    '<div class="remun-card" style="margin-bottom:16px">'+
+      '<div class="remun-title"><i class="ti ti-calculator"></i> Base de cálculo — '+fmtMes(mes)+'</div>'+
+      '<div class="remun-row"><span class="remun-label">Aparelhos (financeiras)</span><span class="remun-val">'+money(atualData.valorAparelhos)+' · '+atualData.aparelhos+' un.</span></div>'+
+      '<div class="remun-row"><span class="remun-label">Balcão</span><span class="remun-val">'+money(atualData.valorBalcao)+' · '+atualData.balcao+' un.</span></div>'+
+      '<div class="remun-row"><span class="remun-label">Meta de faturamento</span><span class="remun-val">'+(metaBatida?'✅ batida':'⚠️ não batida')+'</span></div>'+
+    '</div>';
+  var corpo = v.isSocio
+    ? '<div class="remun-card"><div class="remun-title"><i class="ti ti-crown"></i> Sócio</div><p style="font-size:13px;color:var(--text2);margin:0">Sócio não recebe comissão nem salário pelo sistema de níveis.</p></div>'
+    : baseCalc + remunCardHTML(v, atualData, lvl, metaBatida);
+  box.innerHTML = header + corpo;
+}
 
 async function renderInd() {
   if (!currentUser || currentUser.isAdmin) return;
@@ -1128,9 +1228,7 @@ async function renderInd() {
   var pct  = nx ? Math.min(100,Math.round(atualData.aparelhos/nx.minAp*100)) : 100;
   var gap  = nx ? Math.max(0,nx.minAp-atualData.aparelhos) : 0;
   var pctVal = (lvl.pct*100).toFixed(2).replace('.',',')+'%';
-  var commAp = v.isSocio ? 0 : Math.round(lvl.pct * atualData.valorAparelhos);
-  var commBalc = v.isSocio ? 0 : Math.round(0.04 * atualData.valorBalcao);
-  var total  = v.isSocio ? 0 : v.salario + v.beneficios + commAp + commBalc;
+  // comissão/total agora calculados dentro de remunCardHTML (fonte única)
 
   var infos = [];
   if (nx) {
@@ -1190,15 +1288,7 @@ async function renderInd() {
     metaBarra+
   '</div>';
 
-  var remunHtml = v.isSocio ? '' :
-    '<div class="remun-card">'+
-    '<div class="remun-title"><i class="ti ti-cash"></i> Remuneração estimada — '+fmtMes(mes)+'</div>'+
-    '<div class="remun-row"><span class="remun-label">Salário fixo</span><span class="remun-val">'+money(v.salario)+'</span></div>'+
-    '<div class="remun-row"><span class="remun-label">Benefícios</span><span class="remun-val">'+money(v.beneficios)+'</span></div>'+
-    '<div class="remun-row"><span class="remun-label">Comissão financeiras ('+pctVal+')</span><span class="remun-val">'+money(commAp)+'</span></div>'+
-    '<div class="remun-row"'+(metaBatida?'':' style="opacity:.45"')+'><span class="remun-label">Comissão Balcão (4%)'+(metaBatida?'':' <span style="font-size:11px;color:var(--text3)"><i class="ti ti-lock" style="font-size:11px"></i> libera ao bater a meta</span>')+'</span><span class="remun-val">'+money(commBalc)+'</span></div>'+
-    '<div class="remun-row"><span class="remun-total-label">Total estimado</span><span class="remun-total-val">'+money(total)+'</span></div>'+
-    '</div>';
+  var remunHtml = remunCardHTML(v, atualData, lvl, metaBatida);
 
   var histInd = histTableHTML(v.id, { excludeCurrent:true, showComissao: !v.isSocio });
   var histHtml = '<div class="fat-sec">'+
@@ -1695,7 +1785,7 @@ const ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAMFBMVEXmYwMmGx
 const ICON_512 = "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";
 const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0BAMAAADP4xsBAAAAMFBMVEXwaAIkFw6sSQKamppgKAJcXFza2tqKOQKAgH8AAAD8aQL+/v5oaGikpKQnEQFDQ0L4CIesAAAD1ElEQVR42u3bT2gcVRzA8e/+dRgkBAWJIDaIQsjFPWjRiy7YglKQAUsSI62Df2pRD57StNX2WdgQ1ENACdZDOyopSyIyhyKtWghSQURwTkF66qlITwspk8lONulhk5VsZ2fWeW8MwttLZn9v32dnfvN7LzMvk9x5snrl0bSmNa1pTWta05reG7qY9IHgl08i4xPXnYSeuYSrp8KfVo+W8NuqVEKCi71kSkeEVEJqC+HZ3wHWfu3ELs8BHB6yXpRJSHDj0IMeAK0nOsHvKwBsrBx6U6RPSN5a8noe71JpWCLXx7myvdX6J7jzZafdGQm62tw55HLn2PP29obRuJM+18HopWd2tss/bG9c73zJRwtHRVq6/MijyzHNzZHnnLQJaZFQAp7EkPkgrvE+PalqWtOa3iP6RGb0Rj0z2sguIb6uEE3vFW0m9r4/LZ13k+hbjZR0czRxt63scm2npIOvMzuN+dp/V3ybNzOjT45kRr9bzooOKgWREV2OLzYZ+hV4OiN6PxzuCjmK6ElY6AoJRfSQ7Z/bHZmqpqTL3+x+vwVdM92XqXP9fNd1STWXVfFxM4Mhsy4ASqL9M5xTQk8DMPs3wB1MG+DDdrAmST/rAlQuCmC2PWSCZgHgzC1J2h93gRUawGB7yGw5R4Fw1ZHNtTnuwm3zPIQC6hZ8xQUI33dkc21iLhM4GBabNlAlEJiCmUUVFTJMweaIy6wDTGN4UGHKlqZ9aFA6RhMGAXIwz6RFMXmCTaIdmIDHGSEQAIZA+AfhZYdRSfrqPE/WaXFCbLUDg8EpPM78xuR7srket83X/8rZ5qc/tt+fvupQeelz/INJPWNXzAr7BrzgYRgb3T0tTVww8dcp7BvwZPbaELDYNeHVTXhLQfE9FB1WUdc3osOvKaCnI+vXryqg85GThekpoEuRex0IFXPIsajgG0p+gUXWQksJPRV1FkeU0MWIZJvDSuhWRIn4lhLaiCiGdxRdh0QM9aYi2ku3dtQPfc5OMcz7oyOGutNHt2Ifnykd6I6suopollLd7fZD1+49j6tXlNDhZz/fO2RcS8VpjPr7nLmsZK+nbH8RGOuwPub8sBJ6YIhp4LFdpb6mJtcp15r1EqKmNa1pTWta05rWtKb/h/R6/INga8ylpjeoxDUXWE5NG27sk5e1UKTPdaMU12ptSZzGn0oxd8xN6zsJ+iynejfWCSToojD+6JHP4JoIqjJ3YBOMbR6IbHm1xowd2zfpceNrb/dsWnxKbjS+YPRYnwg/vix7S7py6YvI+AOzST1z+r/XNK1pTWta05rWtKb/xesuDRztr0Sd+vQAAAAASUVORK5CYII=";
 const MANIFEST = '{"name":"KING ALFA NÍVEIS","short_name":"King Níveis","description":"Programa de Níveis — Grupo King Alfa","start_url":"/","scope":"/","display":"standalone","orientation":"portrait","background_color":"#0A0A0A","theme_color":"#0A0A0A","lang":"pt-BR","icons":[{"src":"/icon-192.png?v=7","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"maskable"}]}';
-const SW_JS = `const CACHE='kingalfa-v20';
+const SW_JS = `const CACHE='kingalfa-v21';
 const SHELL=['/','/icon-192.png?v=7','/icon-512.png?v=7','/manifest.webmanifest','/emb-escudeiro.png?v=6','/emb-cavaleiro.png?v=6','/emb-duque.png?v=6','/emb-rei.png?v=6'];
 self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(SHELL);}).then(function(){return self.skipWaiting();}));});
 self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});
