@@ -128,3 +128,4 @@ Para a integração funcionar, você precisa dos IDs numéricos das lojas:
 - <!-- redeploy -->
 <!-- redeploy -->
 BOBA
+RAIVA
