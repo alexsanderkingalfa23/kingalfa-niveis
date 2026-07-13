@@ -126,3 +126,4 @@ Para a integração funcionar, você precisa dos IDs numéricos das lojas:
 - **Admin:** `1234` (altere em Admin → Alterar PIN do Admin)
 - **Todos os vendedores:** `1234` (cada um troca no primeiro acesso)
 - <!-- redeploy -->
+<!-- redeploy -->
