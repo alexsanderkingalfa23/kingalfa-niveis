@@ -127,3 +127,4 @@ Para a integração funcionar, você precisa dos IDs numéricos das lojas:
 - **Todos os vendedores:** `1234` (cada um troca no primeiro acesso)
 - <!-- redeploy -->
 <!-- redeploy -->
+BOBA
