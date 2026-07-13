@@ -509,7 +509,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <button class="tab" id="tab-acomp" onclick="showTab('acomp')" style="display:none"><i class="ti ti-history"></i><span> Acompanhamento</span></button>
     <button class="tab" id="tab-hist" onclick="showTab('hist')" style="display:none"><i class="ti ti-calendar-stats"></i><span> Histórico</span></button>
     <button class="tab" id="tab-ger" onclick="showTab('ger')" style="display:none"><i class="ti ti-users-group"></i><span> Gerência</span></button>
-    <button class="tab" id="tab-cal" onclick="showTab('cal')" style="display:none"><i class="ti ti-calendar-stats"></i><span> Acompanhamento</span></button>
+    <button class="tab" id="tab-cal" onclick="showTab('cal')" style="display:none"><i class="ti ti-calendar-stats"></i><span> Acompanhamento diário</span></button>
   </div>
   <div id="view-geral" class="view on">
     <div class="vg-wrap">
@@ -925,6 +925,7 @@ function loginSuccess(user) {
   } else {
     g('tab-ind').style.display='flex';
     g('tab-geral').style.display='flex';
+    g('tab-cal').style.display='flex';
     showScreen('app'); showTab('geral');
   }
 }
@@ -1190,33 +1191,45 @@ function buildCalendarioHTML(mes, dias){
   return '<div class="cal-month-tot"><span>Total do mês · '+fmtMes(mes)+'</span><span>'+money(mesTotal)+(mesAp>0?' · '+mesAp+' ap.':'')+'</span></div>' + html;
 }
 async function renderCalendario(){
-  if (!currentUser || !currentUser.isGerente) return;
+  if (!currentUser || currentUser.isAdmin) return;
   var box = g('cal-content');
-  var uId = currentUser.gerenteUnidadeId;
-  var u = getUnidade(uId);
-  var team = (appData.vendedores||[]).filter(function(v){ return v.unidadeId===uId; });
-  if (!team.length){ box.innerHTML = '<div class="admin-section"><p style="font-size:13px;color:var(--text2);margin:0">Nenhum vendedor cadastrado nesta unidade.</p></div>'; return; }
-  if (!calSelMes) calSelMes = curMes();
-  var achou = team.some(function(v){ return String(v.id) === String(calSelVend); });
-  if (!calSelVend || !achou) calSelVend = String(team[0].id);
   var cm = curMes();
+  if (!calSelMes) calSelMes = cm;
+  var isGer = !!currentUser.isGerente;
+
+  var team = [], u = null, v = null, selectorHTML = '';
+  if (isGer) {
+    var uId = currentUser.gerenteUnidadeId;
+    u = getUnidade(uId);
+    team = (appData.vendedores||[]).filter(function(x){ return x.unidadeId===uId; });
+    if (!team.length){ box.innerHTML = '<div class="admin-section"><p style="font-size:13px;color:var(--text2);margin:0">Nenhum vendedor cadastrado nesta unidade.</p></div>'; return; }
+    var achou = team.some(function(x){ return String(x.id) === String(calSelVend); });
+    if (!calSelVend || !achou) calSelVend = String(team[0].id);
+    for (var i=0;i<team.length;i++){ if (String(team[i].id)===String(calSelVend)){ v = team[i]; break; } }
+    selectorHTML =
+      '<select id="cal-vend" style="flex:1;min-width:150px;padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
+        team.map(function(x){ return '<option value="'+x.id+'"'+(String(x.id)===String(calSelVend)?' selected':'')+'>'+x.nome+(x.isSocio?' (sócio)':'')+'</option>'; }).join('')+
+      '</select>';
+  } else {
+    v = getVendedor(currentUser.id);
+    if (!v){ box.innerHTML = '<div class="admin-section"><p style="font-size:13px;color:var(--text2);margin:0">Vendedor não encontrado.</p></div>'; return; }
+    u = getUnidade(v.unidadeId);
+  }
+
+  var titulo = isGer ? ('Acompanhamento diário — '+(u?u.nome:'')) : 'Meu acompanhamento diário';
   box.innerHTML =
     '<div class="admin-section">'+
-      '<div class="admin-sec-title"><i class="ti ti-calendar-stats"></i> Acompanhamento diário — '+(u?u.nome:'')+'</div>'+
-      '<p style="font-size:12px;color:var(--text2);margin-bottom:10px">Faturamento dia a dia do vendedor, com total por semana (seg–sáb).</p>'+
+      '<div class="admin-sec-title"><i class="ti ti-calendar-stats"></i> '+titulo+'</div>'+
+      '<p style="font-size:12px;color:var(--text2);margin-bottom:10px">Faturamento dia a dia'+(isGer?' do vendedor':'')+', com total por semana (seg–sáb).</p>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
-        '<select id="cal-vend" style="flex:1;min-width:150px;padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
-          team.map(function(v){ return '<option value="'+v.id+'"'+(String(v.id)===String(calSelVend)?' selected':'')+'>'+v.nome+(v.isSocio?' (sócio)':'')+'</option>'; }).join('')+
-        '</select>'+
-        '<input type="month" id="cal-mes" value="'+calSelMes+'" max="'+cm+'" style="padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
+        selectorHTML+
+        '<input type="month" id="cal-mes" value="'+calSelMes+'" max="'+cm+'" style="'+(isGer?'':'flex:1;min-width:150px;')+'padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
       '</div>'+
     '</div>'+
     '<div id="cal-grid"><div style="text-align:center;padding:40px;color:var(--text3)"><i class="ti ti-loader-2 spin" style="font-size:28px;display:block;margin-bottom:8px"></i>Carregando '+fmtMes(calSelMes)+'...</div></div>';
-  var selV = g('cal-vend'); if (selV) selV.onchange = function(){ calSelVend = this.value; renderCalendario(); };
-  var selM = g('cal-mes');  if (selM) selM.onchange = function(){ if (this.value){ calSelMes = this.value; renderCalendario(); } };
+  if (isGer){ var selV = g('cal-vend'); if (selV) selV.onchange = function(){ calSelVend = this.value; renderCalendario(); }; }
+  var selM = g('cal-mes'); if (selM) selM.onchange = function(){ if (this.value){ calSelMes = this.value; renderCalendario(); } };
   var dados = await fetchDiario(calSelMes);
-  var v = null;
-  for (var i=0;i<team.length;i++){ if (String(team[i].id)===String(calSelVend)){ v = team[i]; break; } }
   var dias = v ? diarioDoVendedor(dados, v) : {};
   var grid = g('cal-grid');
   if (grid) grid.innerHTML = buildCalendarioHTML(calSelMes, dias);
