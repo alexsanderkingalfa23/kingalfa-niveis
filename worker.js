@@ -102,6 +102,48 @@ function group(vendas) {
   return { vendas: r, indexNomes: indexNomes };
 }
 
+// Agrupa vendas por vendedor_id -> dia (e por loja), preservando a data de cada venda.
+// Mesma classificação/quebra de serviço+produto do group(); mantém indexNomes p/ casar com o app.
+function groupDiario(vendas) {
+  const r = {};
+  const indexNomes = {};
+  for (const v of vendas) {
+    const tipo = classify(v.nome_situacao||'', v.__tipoGC);
+    if (!tipo) continue;
+    const dia = (v.data||'').slice(0,10);
+    if (!dia) continue;
+    const id = (v.vendedor_id != null && v.vendedor_id !== '') ? String(v.vendedor_id) : '__sem_id__';
+    if (!r[id]) r[id] = { dias:{}, porLoja:{} };
+    const lj = v.__lojaId || '';
+    if (!r[id].porLoja[lj]) r[id].porLoja[lj] = { dias:{} };
+    const valor = parseFloat(v.valor_total||0);
+    const bump = function(cont){
+      if (!cont.dias[dia]) cont.dias[dia] = {aparelhos:0, servicos:0, balcao:0, valor:0, valorAparelhos:0, valorServicos:0, valorBalcao:0};
+      const c = cont.dias[dia];
+      if (tipo==='aparelho') { c.aparelhos++; c.valorAparelhos += valor; }
+      else if (tipo==='servico') {
+        const vProd = parseFloat(v.valor_produtos||0);
+        const vServ = parseFloat(v.valor_servicos||0);
+        if (vProd > 0 && (vServ + vProd) > 0) { c.servicos++; c.valorServicos += vServ; c.balcao++; c.valorBalcao += vProd; }
+        else { c.servicos++; c.valorServicos += valor; }
+      }
+      else if (tipo==='balcao') { c.balcao++; c.valorBalcao += valor; }
+      c.valor += valor;
+    };
+    bump(r[id]);
+    bump(r[id].porLoja[lj]);
+    const nm = (v.nome_vendedor||'').trim();
+    if (nm) {
+      const key = normNome(nm);
+      if (key) {
+        if (!indexNomes[key]) indexNomes[key] = [];
+        if (indexNomes[key].indexOf(id) === -1) indexNomes[key].push(id);
+      }
+    }
+  }
+  return { porVendedor: r, indexNomes: indexNomes };
+}
+
 const HTML = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -366,6 +408,21 @@ tr.me .vname-pill{border-color:var(--ka)}
 
 @keyframes sp{to{transform:rotate(360deg)}}
 .spin{animation:sp 1s linear infinite;display:inline-block}
+/* ===== Acompanhamento diário (calendário do gerente) — BUILD 25 ===== */
+.cal-month-tot{display:flex;justify-content:space-between;align-items:center;background:var(--bg-card2);border:1px solid var(--ka);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:14px;font-weight:800;color:var(--text)}
+.cal-month-tot span:last-child{color:var(--ka)}
+.cal-week{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:12px}
+.cal-week-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:13px;font-weight:700;color:var(--text)}
+.cal-week-tot{color:var(--ka)}
+.cal-week-cols{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.cal-col-lbl{font-size:10px;font-weight:700;letter-spacing:.5px;color:var(--text3);text-align:center;padding-bottom:2px}
+.cal-cell{background:var(--bg-card2);border:1px solid var(--border2);border-radius:8px;padding:6px 4px;min-height:58px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center}
+.cal-cell.cal-empty{background:transparent;border:1px dashed var(--border2);opacity:.35}
+.cal-cell.cal-has{border-color:var(--ka)}
+.cal-day{font-size:11px;font-weight:700;color:var(--text2);align-self:flex-end}
+.cal-val{font-size:12px;font-weight:700;color:var(--text);margin-top:2px;line-height:1.2;word-break:break-word}
+.cal-cell.cal-has .cal-val{color:var(--ka)}
+.cal-ap{font-size:9px;color:var(--text3);margin-top:1px}
 </style>
 </head>
 <body>
@@ -376,7 +433,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <div class="login-logo">
       <div style="font-size:22px;font-weight:800;color:var(--text)">GRUPO <span style="color:var(--ka)">KING ALFA</span></div>
       <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:uppercase;letter-spacing:2px">Programa de Níveis</div>
-      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 24 · leitura direta</div>
+      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 25 · leitura direta</div>
     </div>
     <div id="seller-step">
       <div class="login-title">Quem é você?</div>
@@ -452,6 +509,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <button class="tab" id="tab-acomp" onclick="showTab('acomp')" style="display:none"><i class="ti ti-history"></i><span> Acompanhamento</span></button>
     <button class="tab" id="tab-hist" onclick="showTab('hist')" style="display:none"><i class="ti ti-calendar-stats"></i><span> Histórico</span></button>
     <button class="tab" id="tab-ger" onclick="showTab('ger')" style="display:none"><i class="ti ti-users-group"></i><span> Gerência</span></button>
+    <button class="tab" id="tab-cal" onclick="showTab('cal')" style="display:none"><i class="ti ti-calendar-stats"></i><span> Acompanhamento</span></button>
   </div>
   <div id="view-geral" class="view on">
     <div class="vg-wrap">
@@ -479,6 +537,13 @@ tr.me .vname-pill{border-color:var(--ka)}
   </div>
   <div id="view-ger" class="view">
     <div class="vi-wrap" id="ger-content">
+      <div style="text-align:center;padding:40px;color:var(--text3)">
+        <i class="ti ti-loader-2 spin" style="font-size:28px;display:block;margin-bottom:8px"></i>Carregando...
+      </div>
+    </div>
+  </div>
+  <div id="view-cal" class="view">
+    <div class="vi-wrap" id="cal-content">
       <div style="text-align:center;padding:40px;color:var(--text3)">
         <i class="ti ti-loader-2 spin" style="font-size:28px;display:block;margin-bottom:8px"></i>Carregando...
       </div>
@@ -846,7 +911,7 @@ async function advanceChangePin() {
 function loginSuccess(user) {
   currentUser = user;
   g('topbar-user').textContent = user.nome;
-  ['tab-admin','tab-acomp','tab-ind','tab-hist','tab-ger'].forEach(function(id){ var t=g(id); if(t) t.style.display='none'; });
+  ['tab-admin','tab-acomp','tab-ind','tab-hist','tab-ger','tab-cal'].forEach(function(id){ var t=g(id); if(t) t.style.display='none'; });
   if (user.isAdmin) {
     g('tab-admin').style.display='flex'; g('tab-acomp').style.display='flex'; g('tab-hist').style.display='flex';
     g('tab-geral').style.display='flex';
@@ -854,6 +919,7 @@ function loginSuccess(user) {
   } else if (user.isGerente) {
     g('tab-ger').style.display='flex';
     g('tab-hist').style.display='flex';
+    g('tab-cal').style.display='flex';
     g('tab-geral').style.display='none';
     showScreen('app'); showTab('ger');
   } else {
@@ -864,7 +930,7 @@ function loginSuccess(user) {
 }
 
 function logout() {
-  currentUser = null; vendaCache = {};
+  currentUser = null; vendaCache = {}; diarioCache = {};
   showScreen('login');
   pinBuffer = ''; backToSeller();
 }
@@ -875,7 +941,7 @@ function showScreen(s) {
   g('screen-'+s).style.flexDirection = 'column';
 }
 function showTab(t) {
-  ['geral','ind','admin','acomp','hist','ger'].forEach(function(id){
+  ['geral','ind','admin','acomp','hist','ger','cal'].forEach(function(id){
     g('view-'+id).classList.toggle('on', id===t);
     var tab=g('tab-'+id); if(tab) tab.classList.toggle('on',id===t);
   });
@@ -885,6 +951,7 @@ function showTab(t) {
   if (t==='acomp') renderAcompanhamento();
   if (t==='hist')  renderHistorico();
   if (t==='ger')   renderGerente();
+  if (t==='cal')   renderCalendario();
 }
 
 // Constrói o HTML do ranking (hero + unidades + individual) para qualquer mês.
@@ -1035,6 +1102,125 @@ async function renderHistorico() {
   if (rk) rk.innerHTML = buildRankingHTML(histSelMes, allData, { showFat: true, meuId: null, unidadeId: uId });
 }
 function onHistMes(val){ if(!val) return; histSelMes = val; renderHistorico(); }
+
+// ===== Acompanhamento diário (calendário do gerente) — BUILD 25 =====
+var diarioCache = {};
+var calSelMes = '';
+var calSelVend = '';
+async function fetchDiario(mes){
+  if (diarioCache[mes]) return diarioCache[mes];
+  try {
+    var r = await fetch(API_BASE+'/diario?mes='+mes+'&t='+Date.now());
+    var j = await r.json();
+    if (j && j.error) throw new Error(j.error);
+    diarioCache[mes] = j;
+    return j;
+  } catch(e){
+    return { porVendedor:{}, indexNomes:{} };
+  }
+}
+// Resolve o vendedor do app -> dias somados dos vendedor_id da GC (mesma lógica do getSellerVendas).
+function diarioDoVendedor(dados, vendedor){
+  var out = {};
+  if (!dados || !dados.porVendedor) return out;
+  var idx = dados.indexNomes || {};
+  var ids = {};
+  (vendedor.nomesGC||[]).forEach(function(nomeGC){
+    var key = normNomeFront(nomeGC);
+    (idx[key]||[]).forEach(function(id){ ids[id] = true; });
+  });
+  var u = getUnidade(vendedor.unidadeId);
+  var lojaId = (u && u.lojaId) ? String(u.lojaId) : '';
+  Object.keys(ids).forEach(function(id){
+    var e = dados.porVendedor[id];
+    if (!e) return;
+    var dias = e.dias || {};
+    if (lojaId && e.porLoja && e.porLoja[lojaId]) dias = e.porLoja[lojaId].dias || {};
+    Object.keys(dias).forEach(function(d){
+      var src = dias[d];
+      if (!out[d]) out[d] = {valor:0, aparelhos:0, servicos:0, balcao:0};
+      out[d].valor     += src.valor||0;
+      out[d].aparelhos += src.aparelhos||0;
+      out[d].servicos  += src.servicos||0;
+      out[d].balcao    += src.balcao||0;
+    });
+  });
+  return out;
+}
+function buildCalendarioHTML(mes, dias){
+  var parts = mes.split('-');
+  var y = parseInt(parts[0],10), m = parseInt(parts[1],10);
+  var dim = new Date(y, m, 0).getDate();
+  var nomesDia = ['SEG','TER','QUA','QUI','SEX','SÁB'];
+  var weeks = [];
+  var cur = null;
+  for (var day=1; day<=dim; day++){
+    var wd = new Date(y, m-1, day).getDay(); // 0=dom .. 6=sab
+    if (wd === 0) continue;                  // domingo fora
+    if (wd === 1 || cur === null){ cur = {cols:{}}; weeks.push(cur); }
+    cur.cols[wd] = day;
+  }
+  var mesTotal = 0, mesAp = 0, html = '';
+  weeks.forEach(function(wk, wi){
+    var semTotal = 0, semAp = 0, cells = '';
+    for (var c=1; c<=6; c++){
+      var day = wk.cols[c];
+      if (!day){ cells += '<div class="cal-cell cal-empty"></div>'; continue; }
+      var ds = y + '-' + (m<10?'0':'') + m + '-' + (day<10?'0':'') + day;
+      var info = dias[ds];
+      var val = info ? info.valor : 0;
+      var ap  = info ? info.aparelhos : 0;
+      semTotal += val; semAp += ap;
+      var temVenda = !!(info && (val>0 || (info.aparelhos+info.servicos+info.balcao)>0));
+      cells += '<div class="cal-cell'+(temVenda?' cal-has':'')+'">'+
+        '<div class="cal-day">'+day+'</div>'+
+        '<div class="cal-val">'+(temVenda?money(val):'—')+'</div>'+
+        '<div class="cal-ap">'+(ap>0?ap+' ap.':'&nbsp;')+'</div>'+
+      '</div>';
+    }
+    mesTotal += semTotal; mesAp += semAp;
+    html += '<div class="cal-week">'+
+      '<div class="cal-week-hd"><span>Semana '+(wi+1)+'</span><span class="cal-week-tot">'+money(semTotal)+(semAp>0?' · '+semAp+' ap.':'')+'</span></div>'+
+      '<div class="cal-week-cols">'+
+        nomesDia.map(function(n){ return '<div class="cal-col-lbl">'+n+'</div>'; }).join('')+
+        cells+
+      '</div>'+
+    '</div>';
+  });
+  return '<div class="cal-month-tot"><span>Total do mês · '+fmtMes(mes)+'</span><span>'+money(mesTotal)+(mesAp>0?' · '+mesAp+' ap.':'')+'</span></div>' + html;
+}
+async function renderCalendario(){
+  if (!currentUser || !currentUser.isGerente) return;
+  var box = g('cal-content');
+  var uId = currentUser.gerenteUnidadeId;
+  var u = getUnidade(uId);
+  var team = (appData.vendedores||[]).filter(function(v){ return v.unidadeId===uId; });
+  if (!team.length){ box.innerHTML = '<div class="admin-section"><p style="font-size:13px;color:var(--text2);margin:0">Nenhum vendedor cadastrado nesta unidade.</p></div>'; return; }
+  if (!calSelMes) calSelMes = curMes();
+  var achou = team.some(function(v){ return String(v.id) === String(calSelVend); });
+  if (!calSelVend || !achou) calSelVend = String(team[0].id);
+  var cm = curMes();
+  box.innerHTML =
+    '<div class="admin-section">'+
+      '<div class="admin-sec-title"><i class="ti ti-calendar-stats"></i> Acompanhamento diário — '+(u?u.nome:'')+'</div>'+
+      '<p style="font-size:12px;color:var(--text2);margin-bottom:10px">Faturamento dia a dia do vendedor, com total por semana (seg–sáb).</p>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<select id="cal-vend" style="flex:1;min-width:150px;padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
+          team.map(function(v){ return '<option value="'+v.id+'"'+(String(v.id)===String(calSelVend)?' selected':'')+'>'+v.nome+(v.isSocio?' (sócio)':'')+'</option>'; }).join('')+
+        '</select>'+
+        '<input type="month" id="cal-mes" value="'+calSelMes+'" max="'+cm+'" style="padding:9px 12px;border:1px solid var(--border2);border-radius:8px;font-size:14px;background:var(--bg-card2);color:var(--text);outline:none">'+
+      '</div>'+
+    '</div>'+
+    '<div id="cal-grid"><div style="text-align:center;padding:40px;color:var(--text3)"><i class="ti ti-loader-2 spin" style="font-size:28px;display:block;margin-bottom:8px"></i>Carregando '+fmtMes(calSelMes)+'...</div></div>';
+  var selV = g('cal-vend'); if (selV) selV.onchange = function(){ calSelVend = this.value; renderCalendario(); };
+  var selM = g('cal-mes');  if (selM) selM.onchange = function(){ if (this.value){ calSelMes = this.value; renderCalendario(); } };
+  var dados = await fetchDiario(calSelMes);
+  var v = null;
+  for (var i=0;i<team.length;i++){ if (String(team[i].id)===String(calSelVend)){ v = team[i]; break; } }
+  var dias = v ? diarioDoVendedor(dados, v) : {};
+  var grid = g('cal-grid');
+  if (grid) grid.innerHTML = buildCalendarioHTML(calSelMes, dias);
+}
 
 // ===== MINHA EQUIPE (gerente): só a unidade do gerente =====
 async function renderGerente() {
@@ -1800,7 +1986,7 @@ const ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAMFBMVEXmYwMmGx
 const ICON_512 = "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";
 const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0BAMAAADP4xsBAAAAMFBMVEXwaAIkFw6sSQKamppgKAJcXFza2tqKOQKAgH8AAAD8aQL+/v5oaGikpKQnEQFDQ0L4CIesAAAD1ElEQVR42u3bT2gcVRzA8e/+dRgkBAWJIDaIQsjFPWjRiy7YglKQAUsSI62Df2pRD57StNX2WdgQ1ENACdZDOyopSyIyhyKtWghSQURwTkF66qlITwspk8lONulhk5VsZ2fWeW8MwttLZn9v32dnfvN7LzMvk9x5snrl0bSmNa1pTWta05reG7qY9IHgl08i4xPXnYSeuYSrp8KfVo+W8NuqVEKCi71kSkeEVEJqC+HZ3wHWfu3ELs8BHB6yXpRJSHDj0IMeAK0nOsHvKwBsrBx6U6RPSN5a8noe71JpWCLXx7myvdX6J7jzZafdGQm62tw55HLn2PP29obRuJM+18HopWd2tss/bG9c73zJRwtHRVq6/MijyzHNzZHnnLQJaZFQAp7EkPkgrvE+PalqWtOa3iP6RGb0Rj0z2sguIb6uEE3vFW0m9r4/LZ13k+hbjZR0czRxt63scm2npIOvMzuN+dp/V3ybNzOjT45kRr9bzooOKgWREV2OLzYZ+hV4OiN6PxzuCjmK6ElY6AoJRfSQ7Z/bHZmqpqTL3+x+vwVdM92XqXP9fNd1STWXVfFxM4Mhsy4ASqL9M5xTQk8DMPs3wB1MG+DDdrAmST/rAlQuCmC2PWSCZgHgzC1J2h93gRUawGB7yGw5R4Fw1ZHNtTnuwm3zPIQC6hZ8xQUI33dkc21iLhM4GBabNlAlEJiCmUUVFTJMweaIy6wDTGN4UGHKlqZ9aFA6RhMGAXIwz6RFMXmCTaIdmIDHGSEQAIZA+AfhZYdRSfrqPE/WaXFCbLUDg8EpPM78xuR7srket83X/8rZ5qc/tt+fvupQeelz/INJPWNXzAr7BrzgYRgb3T0tTVww8dcp7BvwZPbaELDYNeHVTXhLQfE9FB1WUdc3osOvKaCnI+vXryqg85GThekpoEuRex0IFXPIsajgG0p+gUXWQksJPRV1FkeU0MWIZJvDSuhWRIn4lhLaiCiGdxRdh0QM9aYi2ku3dtQPfc5OMcz7oyOGutNHt2Ifnykd6I6suopollLd7fZD1+49j6tXlNDhZz/fO2RcS8VpjPr7nLmsZK+nbH8RGOuwPub8sBJ6YIhp4LFdpb6mJtcp15r1EqKmNa1pTWta05rWtKb/h/R6/INga8ylpjeoxDUXWE5NG27sk5e1UKTPdaMU12ptSZzGn0oxd8xN6zsJ+iynejfWCSToojD+6JHP4JoIqjJ3YBOMbR6IbHm1xowd2zfpceNrb/dsWnxKbjS+YPRYnwg/vix7S7py6YvI+AOzST1z+r/XNK1pTWta05rWtKb/xesuDRztr0Sd+vQAAAAASUVORK5CYII=";
 const MANIFEST = '{"name":"KING ALFA NÍVEIS","short_name":"King Níveis","description":"Programa de Níveis — Grupo King Alfa","start_url":"/","scope":"/","display":"standalone","orientation":"portrait","background_color":"#0A0A0A","theme_color":"#0A0A0A","lang":"pt-BR","icons":[{"src":"/icon-192.png?v=7","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"maskable"}]}';
-const SW_JS = `const CACHE='kingalfa-v24';
+const SW_JS = `const CACHE='kingalfa-v25';
 const SHELL=['/','/icon-192.png?v=7','/icon-512.png?v=7','/manifest.webmanifest','/emb-escudeiro.png?v=6','/emb-cavaleiro.png?v=6','/emb-duque.png?v=6','/emb-rei.png?v=6'];
 self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(SHELL);}).then(function(){return self.skipWaiting();}));});
 self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});
@@ -1825,6 +2011,22 @@ export default {
     const url = new URL(request.url);
     const cors = {'Access-Control-Allow-Origin':'*','Content-Type':'application/json'};
 
+    if (url.pathname === '/api/diario') {
+      if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
+      const mes = url.searchParams.get('mes');
+      if (!mes) return new Response(JSON.stringify({error:'mes obrigatorio'}),{status:400,headers:cors});
+      try {
+        const [d1,d2,d3] = await Promise.all([
+          fetchVendasMes(mes, LOJAS[0].id, env),
+          fetchVendasMes(mes, LOJAS[1].id, env),
+          fetchVendasMes(mes, LOJAS[2].id, env),
+        ]);
+        const gd = groupDiario([...d1, ...d2, ...d3]);
+        return new Response(JSON.stringify({ success:true, mes:mes, porVendedor:gd.porVendedor, indexNomes:gd.indexNomes }), {headers:cors});
+      } catch(e) {
+        return new Response(JSON.stringify({error:e.message}),{status:500,headers:cors});
+      }
+    }
     if (url.pathname === '/api/vendas') {
       if (request.method === 'OPTIONS') return new Response(null, {headers:cors});
       const mes = url.searchParams.get('mes');
