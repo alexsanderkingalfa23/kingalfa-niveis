@@ -422,7 +422,11 @@ tr.me .vname-pill{border-color:var(--ka)}
 .cal-day{font-size:11px;font-weight:700;color:var(--text2);align-self:flex-end}
 .cal-val{font-size:12px;font-weight:700;color:var(--text);margin-top:2px;line-height:1.2;word-break:break-word}
 .cal-cell.cal-has .cal-val{color:var(--ka)}
-.cal-ap{font-size:9px;color:var(--text3);margin-top:1px}
+.cal-ap{font-size:9px;color:var(--text3);margin-top:1px}.vis-row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 10px;background:var(--bg-card2);border:1px solid var(--border2);border-radius:8px;margin-bottom:6px}
+.vis-row:last-child{margin-bottom:0}
+.vis-nome{font-size:13px;font-weight:700;color:var(--text)}
+.vis-orig{font-size:11px;font-weight:600;color:var(--text3)}
+.vis-val{font-size:13px;font-weight:800;color:var(--ka);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -433,7 +437,7 @@ tr.me .vname-pill{border-color:var(--ka)}
     <div class="login-logo">
       <div style="font-size:22px;font-weight:800;color:var(--text)">GRUPO <span style="color:var(--ka)">KING ALFA</span></div>
       <div style="font-size:11px;color:var(--text3);margin-top:6px;text-transform:uppercase;letter-spacing:2px">Programa de Níveis</div>
-      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 25 · leitura direta</div>
+      <div style="font-size:10px;color:var(--ka);margin-top:4px;font-weight:700;letter-spacing:1px">BUILD 27 · leitura direta</div>
     </div>
     <div id="seller-step">
       <div class="login-title">Quem é você?</div>
@@ -621,6 +625,45 @@ function getUnidade(id){return (appData.unidades||[]).find(function(u){return u.
 function getVendedor(id){return (appData.vendedores||[]).find(function(v){return v.id===id;});}
 function getGerente(id){return (appData.gerentes||[]).find(function(g){return g.id===id;});}
 function findUserById(id){return getVendedor(id)||getGerente(id);}
+// ===== Unidade fixa x lojas onde conta (BUILD 27) =====
+// unidadeId = unidade FIXA do vendedor (onde ele aparece na Gerência e no ranking por loja).
+// Por padrão a venda conta na loja ONDE FOI FEITA — então um vendedor que cobre falta em
+// outra unidade tem a venda somada nele E naquela loja, sem precisar de configuração.
+// unidadeIds é uma RESTRIÇÃO opcional (raro): limita em quais lojas aquele cadastro conta.
+// Serve pra nome genérico no GC (ex.: "VENDEDOR 2") que possa colidir entre lojas.
+function getUnidadeIds(v){
+  if (!v) return [];
+  var lista = v.unidadeIds;
+  if (Object.prototype.toString.call(lista) === '[object Array]' && lista.length) {
+    var out = [];
+    lista.forEach(function(x){
+      var n = parseInt(x,10);
+      if (!isNaN(n) && out.indexOf(n) === -1) out.push(n);
+    });
+    if (v.unidadeId != null && out.indexOf(v.unidadeId) === -1) out.push(v.unidadeId);
+    if (out.length) return out;
+  }
+  return (appData.unidades||[]).map(function(u){ return u.id; });
+}
+function vendedorAtendeUnidade(v, uId){ return getUnidadeIds(v).indexOf(uId) !== -1; }
+function unidadeFixaId(v){ return v ? v.unidadeId : null; }
+// equipe = quem é FIXO nesta loja; visitantes = fixo em outra loja, mas vendeu aqui no mês.
+function equipeEVisitantes(dataMes, uId){
+  var equipe = [], visitantes = [];
+  (appData.vendedores||[]).forEach(function(v){
+    if (v.unidadeId === uId) { equipe.push(v); return; }
+    if (!vendedorAtendeUnidade(v, uId)) return;
+    var d = getSellerVendas(dataMes, v, uId);
+    if ((d.valor||0) > 0 || (d.aparelhos||0) > 0) visitantes.push({v:v, d:d});
+  });
+  visitantes.sort(function(a,b){ return (b.d.valor||0) - (a.d.valor||0); });
+  return {equipe:equipe, visitantes:visitantes};
+}
+function nomeCurtoUnidade(u){
+  if (!u || !u.nome) return '';
+  var p = u.nome.split('—');
+  return (p.length > 1 ? p[p.length-1] : u.nome).trim();
+}
 
 var jbConfigured = () => JSONBIN_ID!=='COLE_O_BIN_ID_AQUI';
 
@@ -699,7 +742,10 @@ function normNomeFront(n) {
   return out.replace(/  +/g, ' ').replace(/^ +| +$/g, '').toUpperCase();
 }
 
-function getSellerVendas(data, vendedor) {
+// scopeUnidadeId: se informado, soma SÓ a fatia daquela unidade (visão da loja: Gerência, total da unidade).
+// Se omitido, soma TODAS as unidades que o vendedor atende (visão da pessoa: dashboard, ranking, nível).
+// Para vendedor de 1 loja só, os dois caminhos dão exatamente o mesmo número.
+function getSellerVendas(data, vendedor, scopeUnidadeId) {
   var result = {aparelhos:0, servicos:0, balcao:0, valor:0, valorAparelhos:0, valorServicos:0, valorBalcao:0};
   if (!data || !data.vendas) return result;
   var idx = data.indexNomes || {};
@@ -709,15 +755,14 @@ function getSellerVendas(data, vendedor) {
     var arr = idx[key] || [];
     arr.forEach(function(id){ ids[id] = true; });
   });
-  var u = getUnidade(vendedor.unidadeId);
-  var lojaId = (u && u.lojaId) ? String(u.lojaId) : '';
-  Object.keys(ids).forEach(function(id) {
-    var e = data.vendas[id];
-    if (!e) return;
-    var src = e;
-    if (lojaId && e.porLoja) {
-      src = e.porLoja[lojaId] || {aparelhos:0, servicos:0, balcao:0, valor:0, valorAparelhos:0, valorServicos:0, valorBalcao:0};
-    }
+  var uIds = (scopeUnidadeId != null) ? [scopeUnidadeId] : getUnidadeIds(vendedor);
+  var lojaIds = [];
+  uIds.forEach(function(uid){
+    var u = getUnidade(uid);
+    if (u && u.lojaId && lojaIds.indexOf(String(u.lojaId)) === -1) lojaIds.push(String(u.lojaId));
+  });
+  function acc(src) {
+    if (!src) return;
     result.aparelhos      += src.aparelhos||0;
     result.servicos       += src.servicos||0;
     result.balcao         += src.balcao||0;
@@ -725,6 +770,15 @@ function getSellerVendas(data, vendedor) {
     result.valorAparelhos += src.valorAparelhos||0;
     result.valorServicos  += src.valorServicos||0;
     result.valorBalcao    += src.valorBalcao||0;
+  }
+  Object.keys(ids).forEach(function(id) {
+    var e = data.vendas[id];
+    if (!e) return;
+    if (lojaIds.length && e.porLoja) {
+      lojaIds.forEach(function(lj){ acc(e.porLoja[lj]); });
+    } else {
+      acc(e);
+    }
   });
   return result;
 }
@@ -963,36 +1017,49 @@ function buildRankingHTML(mes, allData, opts) {
   var meuId = (opts.meuId != null) ? opts.meuId : null;
   var niveis = appData.config.niveis;
   var unidades = opts.unidadeId ? appData.unidades.filter(function(u){ return u.id===opts.unidadeId; }) : appData.unidades;
-  var todosVendedores = (appData.vendedores||[]).filter(function(v){ return !opts.unidadeId || v.unidadeId===opts.unidadeId; });
+  var todosVendedores = (appData.vendedores||[]).filter(function(v){
+    if (!opts.unidadeId) return true;
+    if (v.unidadeId === opts.unidadeId) return true;
+    if (!vendedorAtendeUnidade(v, opts.unidadeId)) return false;
+    var dv = getSellerVendas(allData.mesAtual, v, opts.unidadeId);
+    return (dv.valor||0) > 0 || (dv.aparelhos||0) > 0;
+  });
   var vendedores = todosVendedores.filter(function(v){ return !v.oculto; });
 
   function calcStats(lista) {
     return lista.map(function(v) {
       var u = getUnidade(v.unidadeId);
-      var atualData = getSellerVendas(allData.mesAtual, v);
+      // Escopo da unidade quando o ranking é de uma loja só (Histórico do gerente);
+      // consolidado no ranking geral. Nível é sempre da PESSOA (todas as lojas dela).
+      var scoped = getSellerVendas(allData.mesAtual, v, opts.unidadeId);
+      var atualFull = (opts.unidadeId != null) ? getSellerVendas(allData.mesAtual, v) : scoped;
       var anteriorData = getSellerVendas(allData.mesAnterior, v);
-      var nivelCalc = calcNivel(v, atualData, anteriorData, mes);
+      var nivelCalc = calcNivel(v, atualFull, anteriorData, mes);
       var lvl = niveis[nivelCalc.nivel]||niveis[0];
       return {
         v:v, u:u, lvl:lvl,
-        aparelhos: atualData.aparelhos,
-        servicos:  atualData.servicos,
-        valor:     atualData.valor||0,
+        aparelhos: scoped.aparelhos,
+        servicos:  scoped.servicos,
+        valor:     scoped.valor||0,
         nivelId:   nivelCalc.nivel
       };
     }).sort(function(a,b){ return (b.valor||0) - (a.valor||0); });
   }
 
   var sellerStats = calcStats(vendedores);
-  // usado só pra somar o faturamento/aparelhos REAIS da loja, incluindo vendedores ocultos do ranking
-  var sellerStatsTodos = (todosVendedores.length === vendedores.length) ? sellerStats : calcStats(todosVendedores);
 
+  // Faturamento REAL de cada loja: soma a FATIA de cada vendedor que atende aquela loja
+  // (inclui ocultos, que só somem da lista do ranking, não do total).
   var unitStats = unidades.map(function(u) {
-    var us = sellerStatsTodos.filter(function(s){ return s.u&&s.u.id===u.id; });
-    var usVisiveis = sellerStats.filter(function(s){ return s.u&&s.u.id===u.id; });
-    var totalAp = us.reduce(function(sum,s){ return sum+s.aparelhos; },0);
-    var totalValor = us.reduce(function(sum,s){ return sum+(s.valor||0); },0);
-    return {u:u, totalAp:totalAp, totalValor:totalValor, count:usVisiveis.length};
+    var doUnit = todosVendedores.filter(function(v){ return vendedorAtendeUnidade(v, u.id); });
+    var totalAp = 0, totalValor = 0;
+    doUnit.forEach(function(v){
+      var d = getSellerVendas(allData.mesAtual, v, u.id);
+      totalAp += d.aparelhos||0;
+      totalValor += d.valor||0;
+    });
+    var count = doUnit.filter(function(v){ return !v.oculto; }).length;
+    return {u:u, totalAp:totalAp, totalValor:totalValor, count:count};
   }).sort(function(a,b){ return b.totalValor-a.totalValor; });
 
   var totalAp = sellerStats.reduce(function(s,x){ return s+x.aparelhos; },0);
@@ -1121,7 +1188,7 @@ async function fetchDiario(mes){
   }
 }
 // Resolve o vendedor do app -> dias somados dos vendedor_id da GC (mesma lógica do getSellerVendas).
-function diarioDoVendedor(dados, vendedor){
+function diarioDoVendedor(dados, vendedor, scopeUnidadeId){
   var out = {};
   if (!dados || !dados.porVendedor) return out;
   var idx = dados.indexNomes || {};
@@ -1130,14 +1197,14 @@ function diarioDoVendedor(dados, vendedor){
     var key = normNomeFront(nomeGC);
     (idx[key]||[]).forEach(function(id){ ids[id] = true; });
   });
-  var u = getUnidade(vendedor.unidadeId);
-  var lojaId = (u && u.lojaId) ? String(u.lojaId) : '';
-  Object.keys(ids).forEach(function(id){
-    var e = dados.porVendedor[id];
-    if (!e) return;
-    var dias = e.dias || {};
-    if (lojaId && e.porLoja && e.porLoja[lojaId]) dias = e.porLoja[lojaId].dias || {};
-    Object.keys(dias).forEach(function(d){
+  var uIds = (scopeUnidadeId != null) ? [scopeUnidadeId] : getUnidadeIds(vendedor);
+  var lojaIds = [];
+  uIds.forEach(function(uid){
+    var u = getUnidade(uid);
+    if (u && u.lojaId && lojaIds.indexOf(String(u.lojaId)) === -1) lojaIds.push(String(u.lojaId));
+  });
+  function soma(dias){
+    Object.keys(dias||{}).forEach(function(d){
       var src = dias[d];
       if (!out[d]) out[d] = {valor:0, aparelhos:0, servicos:0, balcao:0};
       out[d].valor     += src.valor||0;
@@ -1145,6 +1212,15 @@ function diarioDoVendedor(dados, vendedor){
       out[d].servicos  += src.servicos||0;
       out[d].balcao    += src.balcao||0;
     });
+  }
+  Object.keys(ids).forEach(function(id){
+    var e = dados.porVendedor[id];
+    if (!e) return;
+    if (lojaIds.length && e.porLoja) {
+      lojaIds.forEach(function(lj){ if (e.porLoja[lj]) soma(e.porLoja[lj].dias); });
+    } else {
+      soma(e.dias);
+    }
   });
   return out;
 }
@@ -1201,7 +1277,7 @@ async function renderCalendario(){
   if (isGer) {
     var uId = currentUser.gerenteUnidadeId;
     u = getUnidade(uId);
-    team = (appData.vendedores||[]).filter(function(x){ return x.unidadeId===uId; });
+    team = (appData.vendedores||[]).filter(function(x){ return x.unidadeId === uId; });
     if (!team.length){ box.innerHTML = '<div class="admin-section"><p style="font-size:13px;color:var(--text2);margin:0">Nenhum vendedor cadastrado nesta unidade.</p></div>'; return; }
     var achou = team.some(function(x){ return String(x.id) === String(calSelVend); });
     if (!calSelVend || !achou) calSelVend = String(team[0].id);
@@ -1230,7 +1306,7 @@ async function renderCalendario(){
   if (isGer){ var selV = g('cal-vend'); if (selV) selV.onchange = function(){ calSelVend = this.value; renderCalendario(); }; }
   var selM = g('cal-mes'); if (selM) selM.onchange = function(){ if (this.value){ calSelMes = this.value; renderCalendario(); } };
   var dados = await fetchDiario(calSelMes);
-  var dias = v ? diarioDoVendedor(dados, v) : {};
+  var dias = v ? diarioDoVendedor(dados, v, (isGer ? currentUser.gerenteUnidadeId : null)) : {};
   var grid = g('cal-grid');
   if (grid) grid.innerHTML = buildCalendarioHTML(calSelMes, dias);
 }
@@ -1245,31 +1321,36 @@ async function renderGerente() {
   var niveis = appData.config.niveis;
   var mes = curMes();
   var allData = await fetchVendas(mes);
-  var team = (appData.vendedores||[]).filter(function(v){ return v.unidadeId===uId; });
+  var ev = equipeEVisitantes(allData.mesAtual, uId);
+  var team = ev.equipe;
 
   var totalUnidade = 0;
   var totalAparelhosUnidade = 0;
   var totalMetaUnidade = 0;
   var totalMetaDefinida = true;
   var cards = team.map(function(v){
-    var d  = getSellerVendas(allData.mesAtual, v);
+    // d = fatia DESTA loja (compõe o faturamento da unidade).
+    // dFull = total da pessoa (todas as lojas) — define nível, progressão e meta individual.
+    var d  = getSellerVendas(allData.mesAtual, v, uId);
+    var dFull = getSellerVendas(allData.mesAtual, v);
+    var fora = (dFull.valor||0) - (d.valor||0);
     var da = getSellerVendas(allData.mesAnterior, v);
-    var nc = calcNivel(v, d, da, mes);
+    var nc = calcNivel(v, dFull, da, mes);
     var lvl = niveis[nc.nivel]||niveis[0];
     var nx  = niveis[nc.nivel+1];
     totalUnidade += (d.valor||0);
     totalAparelhosUnidade += (d.aparelhos||0);
-    var pctNivel = nx ? Math.min(100, Math.round(d.aparelhos/nx.minAp*100)) : 100;
-    var gapNivel = nx ? Math.max(0, nx.minAp - d.aparelhos) : 0;
+    var pctNivel = nx ? Math.min(100, Math.round(dFull.aparelhos/nx.minAp*100)) : 100;
+    var gapNivel = nx ? Math.max(0, nx.minAp - dFull.aparelhos) : 0;
     var metaFat = (v.metaFaturamento != null) ? v.metaFaturamento : (u && u.metaFaturamento != null ? u.metaFaturamento : null);
     if (metaFat) { totalMetaUnidade += metaFat; } else { totalMetaDefinida = false; }
-    var pctMeta = metaFat ? Math.min(100, Math.round(d.valor/metaFat*100)) : 0;
-    var faltaMeta = metaFat ? Math.max(0, metaFat - d.valor) : 0;
+    var pctMeta = metaFat ? Math.min(100, Math.round(dFull.valor/metaFat*100)) : 0;
+    var faltaMeta = metaFat ? Math.max(0, metaFat - dFull.valor) : 0;
     var metaBar = metaFat
       ? '<div class="meta-bar" style="margin-top:10px">'+
-          '<div class="meta-bar-hd"><span class="meta-bar-label">Meta faturamento</span><span class="meta-bar-val">'+money(d.valor)+' / '+money(metaFat)+'</span></div>'+
-          '<div class="meta-bar-bg"><div class="meta-bar-fill" style="width:'+pctMeta+'%;background:'+(d.valor>=metaFat?'var(--green)':'var(--ka)')+'"></div></div>'+
-          '<div class="meta-bar-hint">'+(d.valor>=metaFat ? '✅ Meta atingida ('+pctMeta+'%)' : '⚠️ Faltam '+money(faltaMeta)+' ('+pctMeta+'%)')+'</div>'+
+          '<div class="meta-bar-hd"><span class="meta-bar-label">Meta faturamento</span><span class="meta-bar-val">'+money(dFull.valor)+' / '+money(metaFat)+'</span></div>'+
+          '<div class="meta-bar-bg"><div class="meta-bar-fill" style="width:'+pctMeta+'%;background:'+(dFull.valor>=metaFat?'var(--green)':'var(--ka)')+'"></div></div>'+
+          '<div class="meta-bar-hint">'+(dFull.valor>=metaFat ? '✅ Meta atingida ('+pctMeta+'%)' : '⚠️ Faltam '+money(faltaMeta)+' ('+pctMeta+'%)')+'</div>'+
         '</div>'
       : '<div class="meta-bar" style="margin-top:10px"><div class="meta-bar-hint" style="font-style:italic">Meta a definir pelo admin</div></div>';
     return '<div class="admin-section" style="margin-bottom:14px">'+
@@ -1277,17 +1358,40 @@ async function renderGerente() {
         '<div style="width:52px;height:52px;flex-shrink:0">'+emblemaPorNivel(nc.nivel,52)+'</div>'+
         '<div style="flex:1;min-width:0">'+
           '<div style="font-weight:800;font-size:15px">'+v.nome+'</div>'+
-          '<div style="font-size:12px;color:var(--text2)">'+lvl.nome+' · '+money(d.valor)+' · '+d.aparelhos+' ap.</div>'+
+          '<div style="font-size:12px;color:var(--text2)">'+lvl.nome+' · '+money(dFull.valor)+' · '+dFull.aparelhos+' ap.</div>'+
         '</div>'+
       '</div>'+
+      (fora > 0 ? '<div style="font-size:11px;color:var(--text3);margin-top:6px"><i class="ti ti-arrows-exchange" style="font-size:12px"></i> Cobriu outra loja: '+money(d.valor)+' aqui · '+money(fora)+' em outra unidade</div>' : '')+
       '<div style="margin-top:10px">'+
-        '<div class="meta-bar-hd"><span class="meta-bar-label">Progressão de nível'+(nx?' → '+nx.nome:'')+'</span><span class="meta-bar-val">'+(nx?d.aparelhos+' / '+nx.minAp+' ap.':'👑 Rei')+'</span></div>'+
+        '<div class="meta-bar-hd"><span class="meta-bar-label">Progressão de nível'+(nx?' → '+nx.nome:'')+'</span><span class="meta-bar-val">'+(nx?dFull.aparelhos+' / '+nx.minAp+' ap.':'👑 Rei')+'</span></div>'+
         '<div class="meta-bar-bg"><div class="meta-bar-fill" style="width:'+pctNivel+'%;background:var(--ka)"></div></div>'+
         '<div class="meta-bar-hint">'+(nx?(gapNivel>0?'Faltam '+gapNivel+' aparelhos':'Na faixa de '+nx.nome+'!'):'Nível máximo')+'</div>'+
       '</div>'+
       metaBar+
     '</div>';
   }).join('');
+
+  // Cobertura: vendedor fixo em outra loja que vendeu aqui. Entra no faturamento desta unidade,
+  // mas não vira card de equipe (a equipe dele é a da unidade fixa dele).
+  var visitantesHtml = '';
+  if (ev.visitantes.length) {
+    ev.visitantes.forEach(function(x){
+      totalUnidade += (x.d.valor||0);
+      totalAparelhosUnidade += (x.d.aparelhos||0);
+    });
+    visitantesHtml =
+      '<div class="admin-section" style="margin-bottom:14px">'+
+        '<div class="admin-sec-title"><i class="ti ti-arrows-exchange"></i> Cobertura de outras lojas</div>'+
+        '<p style="font-size:12px;color:var(--text2);margin:0 0 8px">Vendedores de outra unidade que venderam aqui em '+fmtMes(mes)+'. O valor entra no faturamento desta loja.</p>'+
+        ev.visitantes.map(function(x){
+          var uo = getUnidade(x.v.unidadeId);
+          return '<div class="vis-row">'+
+            '<span class="vis-nome">'+x.v.nome+'<span class="vis-orig"> · '+(uo?nomeCurtoUnidade(uo):'')+'</span></span>'+
+            '<span class="vis-val">'+money(x.d.valor)+(x.d.aparelhos?' · '+x.d.aparelhos+' ap.':'')+'</span>'+
+          '</div>';
+        }).join('')+
+      '</div>';
+  }
 
   var pctMetaUnidade = totalMetaUnidade ? Math.min(100, Math.round(totalUnidade/totalMetaUnidade*100)) : 0;
   var faltaMetaUnidade = totalMetaUnidade ? Math.max(0, totalMetaUnidade - totalUnidade) : 0;
@@ -1318,6 +1422,7 @@ async function renderGerente() {
       '</div>'+
       metaUnidadeHtml+
       (cards || '<p style="font-size:13px;color:var(--text2)">Nenhum vendedor cadastrado nesta unidade.</p>')+
+      visitantesHtml+
     '</div>'+
     '<div id="ger-sub-comissao" style="display:none">'+
       '<p style="font-size:13px;color:var(--text2);margin-bottom:12px">Escolha um vendedor da sua unidade para ver o cálculo de remuneração do mês — o mesmo que ele enxerga no dashboard dele.</p>'+
@@ -1407,7 +1512,7 @@ async function gerVerComissao(id) {
     return;
   }
   var v = getVendedor(parseInt(id, 10));
-  if (!v || !currentUser || v.unidadeId !== currentUser.gerenteUnidadeId) { box.innerHTML = ''; return; }
+  if (!v || !currentUser || !vendedorAtendeUnidade(v, currentUser.gerenteUnidadeId)) { box.innerHTML = ''; return; }
   var u = getUnidade(v.unidadeId);
   var mes = curMes();
   box.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text3)"><i class="ti ti-loader-2 spin" style="font-size:24px;display:block;margin-bottom:8px"></i>Carregando...</div>';
@@ -1698,8 +1803,11 @@ async function renderAdmin() {
   var unitFat = {};
   unidades.forEach(function(u){ unitFat[u.id] = 0; });
   vendedores.forEach(function(v){
-    var d = getSellerVendas(allDataAdm.mesAtual, v);
-    if (v.unidadeId != null && unitFat[v.unidadeId] != null) unitFat[v.unidadeId] += (d.valor||0);
+    getUnidadeIds(v).forEach(function(uid){
+      if (unitFat[uid] == null) return;
+      var d = getSellerVendas(allDataAdm.mesAtual, v, uid);
+      unitFat[uid] += (d.valor||0);
+    });
   });
 
   var nivelRows = niveis.map(function(lv) {
@@ -1720,11 +1828,19 @@ async function renderAdmin() {
 
   var vendRows = vendedores.map(function(v) {
     var gcVal = (v.nomesGC||[]).filter(function(n){return n && n.trim();}).join(', ');
+    var uIdsV = getUnidadeIds(v);
+    var extrasCell = unidades.map(function(u2){
+      return '<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);white-space:nowrap">'+
+        '<input type="checkbox" class="adm-uextra" data-id="'+v.id+'" data-uid="'+u2.id+'"'+(uIdsV.indexOf(u2.id)!==-1?' checked':'')+' style="width:14px;height:14px">'+
+        nomeCurtoUnidade(u2)+
+      '</label>';
+    }).join('');
     return '<tr>'+
       '<td><input type="text" class="adm-nome" data-id="'+v.id+'" value="'+v.nome+'" style="min-width:130px"></td>'+
       '<td><select class="adm-unit" data-id="'+v.id+'">'+
         unidades.map(function(u2){return'<option value="'+u2.id+'"'+(u2.id===v.unidadeId?' selected':'')+'>'+u2.nome+'</option>';}).join('')+
       '</select></td>'+
+      '<td><div style="display:flex;flex-direction:column;gap:2px" title="Lojas onde este cadastro conta faturamento. Por padrão conta em todas (cobertura de falta). Desmarque só para restringir. A unidade fixa entra sempre.">'+extrasCell+'</div></td>'+
       '<td><input type="text" class="adm-gcnomes" data-id="'+v.id+'" value="'+gcVal+'" placeholder="Ex: CYBELLE" title="Nome(s) exato(s) como aparece no Gestão Click. Vários separados por vírgula." style="min-width:180px"></td>'+
       '<td><button class="btn btn-g" onclick="toggleSocio('+v.id+')" title="Alternar entre Sócio e Vendedor" style="font-size:12px;padding:6px 10px;white-space:nowrap">'+(v.isSocio?'<i class="ti ti-crown" style="font-size:13px;color:var(--ka)"></i> Sócio':'<i class="ti ti-user" style="font-size:13px;color:var(--text2)"></i> Vendedor')+'</button></td>'+
       '<td>'+(v.isSocio?'<span class="socio-badge">Sócio</span>':'<input type="number" class="adm-sal" data-id="'+v.id+'" value="'+v.salario+'" min="0" style="width:90px">')+'</td>'+
@@ -1761,7 +1877,7 @@ async function renderAdmin() {
     '<div class="admin-sec-title"><i class="ti ti-users"></i> Vendedores</div>'+
     '<p style="font-size:12px;color:var(--text2);margin-bottom:14px">O campo <strong>Nome no GC</strong> deve ter o nome <em>exato</em> do vendedor como aparece nas vendas do Gestão Click. Se o vendedor usa mais de um nome (ex: sócio que vende em 2 lojas), separe por vírgula.</p>'+
     '<div class="atw" style="overflow-x:auto"><table class="at"><thead><tr>'+
-    '<th>Nome</th><th>Unidade</th><th>Nome no GC</th><th>Função</th><th>Salário</th><th>Benefícios</th><th>Meta R$</th><th>Ranking</th><th>PIN</th><th></th>'+
+    '<th>Nome</th><th>Unidade fixa</th><th>Conta em</th><th>Nome no GC</th><th>Função</th><th>Salário</th><th>Benefícios</th><th>Meta R$</th><th>Ranking</th><th>PIN</th><th></th>'+
     '</tr></thead><tbody id="vend-tbody">'+vendRows+'</tbody></table></div>'+
     '<div class="btn-row">'+
     '<button class="btn btn-g" onclick="addVendedor()"><i class="ti ti-user-plus"></i> Adicionar</button>'+
@@ -1885,6 +2001,24 @@ async function saveVendedores() {
     var id = parseInt(el.dataset.id), v = getVendedor(id);
     if (v) v.unidadeId = parseInt(el.value);
   });
+  // "Conta em": todas marcadas = padrão (não grava campo). Subconjunto = restrição explícita.
+  var extras = {};
+  document.querySelectorAll('[class*=adm-uextra]').forEach(function(el) {
+    var id = parseInt(el.dataset.id);
+    if (!extras[id]) extras[id] = [];
+    if (el.checked) extras[id].push(parseInt(el.dataset.uid, 10));
+  });
+  var totalUnidades = (appData.unidades||[]).length;
+  Object.keys(extras).forEach(function(k) {
+    var v = getVendedor(parseInt(k, 10));
+    if (!v) return;
+    var lista = [];
+    extras[k].forEach(function(n){ if (!isNaN(n) && lista.indexOf(n) === -1) lista.push(n); });
+    if (v.unidadeId != null && lista.indexOf(v.unidadeId) === -1) lista.push(v.unidadeId);
+    lista.sort(function(a,b){ return a-b; });
+    if (lista.length >= totalUnidades) delete v.unidadeIds;
+    else v.unidadeIds = lista;
+  });
   document.querySelectorAll('[class*=adm-gcnomes]').forEach(function(el) {
     var id = parseInt(el.dataset.id), v = getVendedor(id);
     if (v) {
@@ -1999,7 +2133,7 @@ const ICON_192 = "iVBORw0KGgoAAAANSUhEUgAAAMAAAADABAMAAACg8nE0AAAAMFBMVEXmYwMmGx
 const ICON_512 = "iVBORw0KGgoAAAANSUhEUgAAAgAAAAIABAMAAAAGVsnJAAAAMFBMVEX7aQL4+PgvJyJjY2OsTANfJQGhoaGOOQG/wMA/QD6/wL7AwL5BP0F/gIDAvsAAAAD4V2XPAAALaUlEQVR42u3d74sbxxkH8K9OJzuRvUUX6hehrqNcfXWTcy5bU+iLQqrGL80VmXBtjB1zlL52BHkR2vSHS0jftegfCFzjpC4YjCC0FNqGc8EvCjEo/pUzSVqRUijYCYf3KvuQdNsX2tVKq5UuWs3s7sx+9410q9uV5rMzzzwzWu1mbKR7mQEBCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgAAEIAABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgAAEIAABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgACSFlP6O2SkXkfI+ubxS1PuYuVau64swOHnaiJ2c/JNRQGO3BXVTu8pGQO+Lar82PmyijVA2PEHgMxnytWALZHlh11RDcA6J3Z/F03FmsD8pugjdU8pgK1DzpPcV/0BrTG+nEXfiiW3J11aVwngWLeYuYPX/K/cL47d8EuNUcmEpCogB8CpALnH65O2jYBwb323IbEKyAmCSyPLv9tiBKy60q00NxTqBbrH6ilBSbxxpdsVqgPwwASAk8KqrPEfAEBFGYDvAEBO4BDm0SIAvK0MQAMATgW/tkuzKAev/jsA7JiKAGwBQK4a/GJu/LYjfPYXAaCgCMASADw64sX2+G1HdZJXZfUDMgAK446WUR77cerj3DKKADTGlQRj+4YzIzuCIoAdNQC2AGD/yJc/GLNpbrTOVQAoKQGQBYDRGb9xYPSmY1KnNiBlklgCwOIuFf3OgTJWen3Eyg+BfBVA5dWVJ8dsZZQBXFBiMHSsIWXoJmm3kmaEJOTtm27rSjyACeAl8bu9JedQSQCo7Z7whlk6AFoqAFiQ2KpMVWLAJlRZ1Pl63FAKoM4aQAACEIAABCAAAQhAAAIQgAAEIAABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQQFOATNoBbLUAZgXvz/peNt0Azu98U9sELNXKLxogg5QDsBskAAEIQAACEIAABCAAAQhAAAIQgAAEIAABhC4F1oCUA6yyBqQcoJp2gG/92BS8x1m1AC4LP2KC9yf/u3HRFxYVDGAUpAsUkh0DPphfUKtRiY4BxvvWE+wGCUCANAOk/jS5PenuBbZefZBugHO1dMcAS7Xy8zS5uLvB5mrKAVq1lAOsNtMNYNVaZqoBslHcVzXJAItSLpmvEEB519vO6A1gVYFtM8UAM8C4u3HoD3AUAP6UYoAiEPfPzGIFsNYBoL2aWgDnxkm11AI4h76ZWgDn0LfSCtD01YTUASz6akLqAMyhqpAuAG/+MM4hcYwAuYExUQoBnvKevp5KgA+9p5PcmmxTG4BHSu6z2bUJGk5dn16g4T7ZF67hKA9wfWBQ+IWWpUPryQaYaGjr3oF3glq9WUeyAYziJP99sfvwU53GAlcWViYNg7Pnv/gWBeEAws8S+4d1acIwuAOdasBkXxBfB4Bn4ksC4p4PgFEW37ErBZCAJeYvRmoxzwfFfTG1HBDvfFC0NcAMzmtrQ6u/pinAxtCaIhA0HzSvJ4C17a/s1joQEAQe/lVPgCx+HxQChoPAT6I8aWImyrdqrQYObX1BoFnVA+AF/4rtobNBnJGTLwicDkj4vq4gwOUXhjuBwV88NZ2x/eCkcLMGvOvbdOFfKjaBy6vDveCN/hWtwP7xNADfdUm/8bGaMeB3q0MDmYEq0Hv5gi859H2q5h1Vg+A75lCf1+hbU/P1BgCAJcB33lBzH9BWE6C9Yfb3ggDwv76CeeHR+zfnqqx92zVPQOYPXKUBWACwfdv0jRHa5eEQ0F/emYH+AYB1Yl3lPKB1u/f0aPfhz70V571/84LAz7oP1V75fyG3/NITodYe31HedsttVYdSQuBhta/+ALDOVlXPBFvHfSt+HfDOvSBwaiBgAGdrymaChvvkvVWvF+xPe44G5IS9b8ydSYWH0ssfxVig3tcLjlqc1M8ouf2HToOh+kCl7k2CFoM+RmEwYuzoAJAbqNRAHgE1wj1Z8u1BgLwOAB1fky8HvrETITK+v0saADjR8Jbzp3suwJnB/3LOmM6XBttCQQOAilM058jvIHAWxB4s+Mxaf/xQG8Ad/rzVfVgOnATpBYFuwWfdr8tuagDgHkTjcL/H0ExorT9kvuZulFEYoOQDwEcVAHvrvrkA39gwDwC58/5XswoC/NF53NMb6r0BoGMOpnz+sWETAJ72hoJO5HxRQYD8EXdAaPZlAO3bo45ot06c7kuV0Py+kyycXpPXBmzRy/25ubk527Zt+7CbCj3bfaU7GfJL27btYsCh8DZx9+S2oudt27btubm5uWeFf1yZQfCj8mAd6HZ1vzIR+HPRLIDmx31poOUe/+f/pmov8A4GBJzc53bwdRZaJvBaX7LYq/97ZZZfLkAvlW9tmF562zoe/GtRE086sx+vA2j2psLknkAgNw+o9GY8Nkxv+PPeauDpnheaDa81eOV3UyclAbyavr1heof9D8XAj3LC6xKb+7zBotzxgNwLKtYLfQKnvOeBkyNtb+0P7gakknKWjPDfbVpPAPjc6cj3CThEbgx4DMChulpNoCPiEKk8GDIqArsSJUeDDYE9iZIAAnL4mtIAe8XNJ6gJMH0WJ/sSI5IBjER0JDECTP+TSENxgHrsgjED3IxdMGaAafO4WdUBOjEDxg4wbTLcUR1g2kTu58oD1GP1SwBALla/BAB04uRLAkDvtJ9kxsAIvh0uTLPxsgYA9dj0EgJwMza9hABMk8vN6gCQjwkvMQDTzGp2tACYIplb1gJginZc0AJgipnhNS0AWnHQJQkgfDK8owdA+Jac1wQgdBQsawJwM3K5hAGEzedmdQHIRwyXOICwyXBHG4CQyfCyNgAh23JBG4BcpG4JBAjXmPfqAxAuGY7mOoPRXEYnVGvOawQQalhb0Qgg1Li2oRFAK7Jqk1CAMGc6RXQLroiuJRZiYNuJ5pPNRvM2b5kTb/KJVgBGRMVJbBNI7kIAAhAg3UskvUDY6wR/ognAwj9DbvjKb7RoAs3QF8T8rakFwGL4TYtaAExxGN/VAmAz/KZZLQDW054HlNIOUAi/qR5niV0Mv+lLWgA8Ugm7ZW5Nj0zwjZBnSGT/q0kqnP8LR4MEIAABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgAAEIAABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgAAEIAABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgAAEIAABCEAAAhCAAAQgAAEIQAACJBjAFL9LizVAEQADkHLH3IwyNaAspwkAQL6uShOoid9lFiHvXBk5QF1OxFqElBsuSADYhJSL1pcA2EoA3ALQEh4ErBrC3bs0eoCOlG4gA0i58ZIEABsAboje65LbupIPYJRlBIESgJz4XhAZCXFlfhPA0rrYdnUAQOYzNVLhWxLawAIg5647MgDaEN8GSoCcm3bJADDKAFoVkbt8UJMUAqTEANwvAsg9LvDz/qgmKQTIuc9QBgBa/xa3wyN3AeAZZeYDjCIA2CVR+9u6CwAz68oA4CoA4ENB+bB1DgBwRspHlRIDnDYrKAxYL3cH15+rBDDfTVpzB69NvavDz3XLLyUESgNwjxpyy9NVguyisyMcqqsEgAdfEbzDs1UoBYBjDbHB+p6kzyltWvyK2N0dhWoAxqdCG8C6cgDYf0Dcvk5WoR4A7hwUVv43oSIArn9aFrGb3JLE8svrBZws5vilKUtffv+a1E8oGSD5C78dJgABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgAAEIAABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgAAEIAABCEAAAhCAAAQgAAEIQAACEIAABCAAAQhAAAIQgAAEIICiy/8BVsHgU3ErZ40AAAAASUVORK5CYII=";
 const ICON_180 = "iVBORw0KGgoAAAANSUhEUgAAALQAAAC0BAMAAADP4xsBAAAAMFBMVEXwaAIkFw6sSQKamppgKAJcXFza2tqKOQKAgH8AAAD8aQL+/v5oaGikpKQnEQFDQ0L4CIesAAAD1ElEQVR42u3bT2gcVRzA8e/+dRgkBAWJIDaIQsjFPWjRiy7YglKQAUsSI62Df2pRD57StNX2WdgQ1ENACdZDOyopSyIyhyKtWghSQURwTkF66qlITwspk8lONulhk5VsZ2fWeW8MwttLZn9v32dnfvN7LzMvk9x5snrl0bSmNa1pTWta05reG7qY9IHgl08i4xPXnYSeuYSrp8KfVo+W8NuqVEKCi71kSkeEVEJqC+HZ3wHWfu3ELs8BHB6yXpRJSHDj0IMeAK0nOsHvKwBsrBx6U6RPSN5a8noe71JpWCLXx7myvdX6J7jzZafdGQm62tw55HLn2PP29obRuJM+18HopWd2tss/bG9c73zJRwtHRVq6/MijyzHNzZHnnLQJaZFQAp7EkPkgrvE+PalqWtOa3iP6RGb0Rj0z2sguIb6uEE3vFW0m9r4/LZ13k+hbjZR0czRxt63scm2npIOvMzuN+dp/V3ybNzOjT45kRr9bzooOKgWREV2OLzYZ+hV4OiN6PxzuCjmK6ElY6AoJRfSQ7Z/bHZmqpqTL3+x+vwVdM92XqXP9fNd1STWXVfFxM4Mhsy4ASqL9M5xTQk8DMPs3wB1MG+DDdrAmST/rAlQuCmC2PWSCZgHgzC1J2h93gRUawGB7yGw5R4Fw1ZHNtTnuwm3zPIQC6hZ8xQUI33dkc21iLhM4GBabNlAlEJiCmUUVFTJMweaIy6wDTGN4UGHKlqZ9aFA6RhMGAXIwz6RFMXmCTaIdmIDHGSEQAIZA+AfhZYdRSfrqPE/WaXFCbLUDg8EpPM78xuR7srket83X/8rZ5qc/tt+fvupQeelz/INJPWNXzAr7BrzgYRgb3T0tTVww8dcp7BvwZPbaELDYNeHVTXhLQfE9FB1WUdc3osOvKaCnI+vXryqg85GThekpoEuRex0IFXPIsajgG0p+gUXWQksJPRV1FkeU0MWIZJvDSuhWRIn4lhLaiCiGdxRdh0QM9aYi2ku3dtQPfc5OMcz7oyOGutNHt2Ifnykd6I6suopollLd7fZD1+49j6tXlNDhZz/fO2RcS8VpjPr7nLmsZK+nbH8RGOuwPub8sBJ6YIhp4LFdpb6mJtcp15r1EqKmNa1pTWta05rWtKb/h/R6/INga8ylpjeoxDUXWE5NG27sk5e1UKTPdaMU12ptSZzGn0oxd8xN6zsJ+iynejfWCSToojD+6JHP4JoIqjJ3YBOMbR6IbHm1xowd2zfpceNrb/dsWnxKbjS+YPRYnwg/vix7S7py6YvI+AOzST1z+r/XNK1pTWta05rWtKb/xesuDRztr0Sd+vQAAAAASUVORK5CYII=";
 const MANIFEST = '{"name":"KING ALFA NÍVEIS","short_name":"King Níveis","description":"Programa de Níveis — Grupo King Alfa","start_url":"/","scope":"/","display":"standalone","orientation":"portrait","background_color":"#0A0A0A","theme_color":"#0A0A0A","lang":"pt-BR","icons":[{"src":"/icon-192.png?v=7","sizes":"192x192","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/icon-512.png?v=7","sizes":"512x512","type":"image/png","purpose":"maskable"}]}';
-const SW_JS = `const CACHE='kingalfa-v25';
+const SW_JS = `const CACHE='kingalfa-v27';
 const SHELL=['/','/icon-192.png?v=7','/icon-512.png?v=7','/manifest.webmanifest','/emb-escudeiro.png?v=6','/emb-cavaleiro.png?v=6','/emb-duque.png?v=6','/emb-rei.png?v=6'];
 self.addEventListener('install',function(e){e.waitUntil(caches.open(CACHE).then(function(c){return c.addAll(SHELL);}).then(function(){return self.skipWaiting();}));});
 self.addEventListener('activate',function(e){e.waitUntil(caches.keys().then(function(ks){return Promise.all(ks.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);}));}).then(function(){return self.clients.claim();}));});
